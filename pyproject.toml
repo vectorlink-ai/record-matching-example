@@ -22,6 +22,7 @@ vectorize = 'record_matching_example.match_records:vectorize_records'
 average = 'record_matching_example.match_records:average_fields'
 build-index-map = 'record_matching_example.match_records:build_index_map'
 index-field = 'record_matching_example.match_records:index_field'
+load-ann = 'record_matching_example.match_records:load_ann'
 
 [tool.uv.sources]
 vectorlink-gpu = { git = "ssh://git@github.com/vectorlink-ai/vectorlink-gpu" }
