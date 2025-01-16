@@ -14,7 +14,13 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project.scripts]
-hello = 'record_matching_example.main:main'
+match-records = 'record_matching_example.match_records:main'
+ingest-csv = 'record_matching_example.match_records:ingest_csv'
+template-records = 'record_matching_example.match_records:template_records'
+dedup = 'record_matching_example.match_records:dedup_records'
+vectorize = 'record_matching_example.match_records:vectorize_records'
+average = 'record_matching_example.match_records:average_fields'
+build-index-map = 'record_matching_example.match_records:build_index_map'
 
 [tool.uv.sources]
 vectorlink-gpu = { git = "ssh://git@github.com/vectorlink-ai/vectorlink-gpu" }

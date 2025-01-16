@@ -3,6 +3,9 @@ import pyarrow as pa
 from vectorlink_py import template as tpl, dedup, embed, records
 import sys
 
+from vectorlink_gpu.ann import ANN
+from vectorlink_gpu.datafusion import dataframe_to_tensor
+
 """
 Matching process
 
@@ -25,9 +28,9 @@ templates = {
     "language": "{{#if language}}language: {{language}}\n{{/if}}",
 }
 
-templates[
-    "composite"
-] = f"{templates['title']}{templates['artist']}{templates['album']}{templates['year']}{templates['language']}"
+templates["composite"] = (
+    f"{templates['title']}{templates['artist']}{templates['album']}{templates['year']}{templates['language']}"
+)
 
 INPUT_CSV_SCHEMA = pa.schema(
     [
@@ -51,12 +54,21 @@ def eprintln(string):
     print(string, file=sys.stderr)
 
 
-def main():
+def ingest_csv():
+    eprintln("ingesting csv to parquet...")
     sc = df.SessionConfig().with_batch_size(10)
     ctx = df.SessionContext(config=sc)
     dataframe = ctx.read_csv(
         INPUT_CSV_PATH, file_extension=".dapo", schema=INPUT_CSV_SCHEMA
     )
+
+    dataframe.write_parquet("output/records/")
+
+
+def template_records():
+    sc = df.SessionConfig().with_batch_size(10)
+    ctx = df.SessionContext(config=sc)
+    dataframe = ctx.read_parquet("output/records/")
 
     eprintln("templating...")
     tpl.write_templated_fields(
@@ -75,12 +87,27 @@ def main():
         ],
     )
 
+
+def dedup_records():
+    sc = df.SessionConfig().with_batch_size(10)
+    ctx = df.SessionContext(config=sc)
+
     eprintln("dedupping...")
     for key in templates.keys():
         dedup.dedup_from_into(ctx, f"output/templated/{key}/", "output/dedup/")
 
+
+def vectorize_records():
+    sc = df.SessionConfig().with_batch_size(10)
+    ctx = df.SessionContext(config=sc)
+
     eprintln("vectorizing...")
     embed.vectorize(ctx, "output/dedup/", "output/vectors/")
+
+
+def average_fields():
+    sc = df.SessionConfig().with_batch_size(10)
+    ctx = df.SessionContext(config=sc)
 
     eprintln("averaging (for imputation)...")
     for key in templates.keys():
@@ -88,7 +115,29 @@ def main():
             ctx, "output/templated", key, "output/vectors/", "output/vector_averages"
         )
 
-    eprintln("index field...")
+
+def build_index_map():
+    ctx = df.SessionContext()
+
+    ctx.read_parquet("output/templated/composite").sort(df.col("hash")).select(
+        (df.functions.row_number() - 1).alias("vector_id"),
+        df.col('"TID"'),
+        df.col("hash"),
+    ).write_parquet("output/index_map/")
+
+
+def index_field():
+    ctx = df.SessionContext()
+    pass
+
+
+def main():
+    ingest_csv()
+    template_records()
+    dedup_records()
+    vectorize_records()
+    average_fields()
+    build_index_map()
 
 
 if __name__ == "__main__":
