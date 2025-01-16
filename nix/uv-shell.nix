@@ -4,7 +4,7 @@ let editableOverlay = workspace.mkEditablePyprojectOverlay {
       root = "$REPO_ROOT";
     };
     editablePythonSet = pythonSet.overrideScope editableOverlay;
-    virtualenv = editablePythonSet.mkVirtualEnv "vectorlink-py-env" workspace.deps.all; in
+    virtualenv = editablePythonSet.mkVirtualEnv "record-matching-example-env" workspace.deps.all; in
 mkShell {
   packages = [
     virtualenv

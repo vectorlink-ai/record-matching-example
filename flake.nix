@@ -3,18 +3,18 @@
     nixpkgs.url = "github:nixOS/nixpkgs?ref=nixos-24.11";
     flake-utils.url = "github:numtide/flake-utils";
     pyproject-nix = {
-      url = "github:pyproject-nix/pyproject.nix";
+      url = "github:pyproject-nix/pyproject.nix/e14a14";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     uv2nix = {
-      url = "github:pyproject-nix/uv2nix";
+      url = "github:pyproject-nix/uv2nix/b371dcc";
       inputs.pyproject-nix.follows = "pyproject-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
     pyproject-build-systems = {
-      url = "github:pyproject-nix/build-system-pkgs";
+      url = "github:pyproject-nix/build-system-pkgs/22d5f5";
       inputs.pyproject-nix.follows = "pyproject-nix";
       inputs.uv2nix.follows = "uv2nix";
       inputs.nixpkgs.follows = "nixpkgs";
