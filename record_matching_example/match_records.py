@@ -2,6 +2,7 @@ import datafusion as df
 import pyarrow as pa
 from vectorlink_py import template as tpl, dedup, embed, records
 import sys
+import torch
 
 from vectorlink_gpu.ann import ANN
 from vectorlink_gpu.datafusion import dataframe_to_tensor
@@ -128,7 +129,25 @@ def build_index_map():
 
 def index_field():
     ctx = df.SessionContext()
-    pass
+    index_map = ctx.read_parquet("output/index_map/")
+    count = index_map.count()
+    embeddings = (
+        index_map.with_column_renamed("hash", "map_hash")
+        .join(
+            ctx.read_parquet("output/vectors/"),
+            left_on="map_hash",
+            right_on="hash",
+            how="left",
+        )
+        .sort(df.col("vector_id"))
+        .select("embedding")
+    )
+
+    vectors = torch.empty((count, 1536), dtype=torch.float32, device="cuda")
+    dataframe_to_tensor(embeddings, vectors)
+
+    ann = ANN(vectors, beam_size=32)
+    print(ann.dump_logs())
 
 
 def main():
