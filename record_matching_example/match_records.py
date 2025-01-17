@@ -3,6 +3,9 @@ import pyarrow as pa
 from vectorlink_py import template as tpl, dedup, embed, records
 import sys
 import torch
+import scipy
+from openai import OpenAI
+import re
 
 from vectorlink_gpu.ann import ANN
 from vectorlink_gpu.datafusion import dataframe_to_tensor, tensor_to_arrow
@@ -164,9 +167,132 @@ def index_field():
         df.col("beams"),
         df.col("distances"),
     ).write_parquet("output/ann/")
+    return ann
 
 
-def load_ann():
+def discover_training_set():
+    """
+    1. Loads the existing ANN
+    2. Finds the first peak of the first derivative
+    3. Keeping a tally to balance, guesses on the left or right of the first peak threshold
+    4. Sends records (in toto) to LLM
+    4. Writes each match or non-match in a training table
+    """
+
+    # 1.
+    ann = load_ann()
+    distances = ann.distances
+    (vector_count, beam_size) = distances.size()
+
+    # 2.
+    sample_size = 1000
+    sample_size = min(vector_count, sample_size)
+    all_distances = distances[0:sample_size].flatten().sort()
+    (length,) = all_distances.size()
+    tail = all_distances[1:length]
+    head = all_distances[0 : length - 1]
+    diff = tail - head
+    # maybe use smoothing (savitzky_golay?) for smoothing first to remove jitter?
+    (peaks, _) = scipy.signal.find_peaks(diff.numpy)
+    # Assume first peak is good for now
+    first_peak = peaks[0]
+    threshold = all_distances[first_peak]
+
+    # 3.
+    ctx = df.SessionContext()
+    candidate_size = 1000  # increase for better training
+    same = 0
+    different = 0
+    record = []
+    candidates = []
+    for i in range(0, candidate_size):
+        beam = ann.beams[i]
+        distance = ann.distances[i]
+        indices = (distance > threshold).nonzero()
+        (count, _) = indices.size()
+        if indices == 0:
+            continue
+        pivot = indices[0][0]
+        total = same + different
+        if same_count > total / 2 and pivot < len(distance):
+            last = len(beam) - 1
+            j = beam[last]
+        else:
+            j = beam[first]
+
+        (answer, id1, id2) = ask_oracle(ctx, i, j)
+        if answer == True:
+            same += 1
+        else:
+            different += 1
+
+        record = {"match": answer, "left": id1, "right": id2}
+        candidates.append(record)
+    candidates_pd = pd.DataFrame(candidates)
+    ctx.from_pandas(candidates_pd).write_parquet("output/training_set/")
+
+
+def get_record_from_vid(ctx, vid) -> str:
+    templated_df = ctx.read_parquet("output/templated/composite").select(
+        df.col("templated"), df.col('"TID"').alias("tid")
+    )
+    result = (
+        ctx.read_parquet("output/index_map/")
+        .filter(vid == df.col("vector_id"))
+        .join(templated_df, left_on='"TID"', right_on="tid", how="inner")
+        .select(df.col('"TID"'), df.col("templated"))
+        .limit(1)
+    )
+    return result.to_pylist()[0]
+
+
+def check_y_or_n(string):
+    if re.search(r".*[Y|y]es\W*$", string, re.MULTILINE) is None:
+        return False
+    else:
+        return True
+
+
+def ask_oracle(ctx, vid1, vid2):
+    """
+    1. Map from vid to record id
+    2. load record 1 and 2
+    3. Ask LLM for match of record 1 and 2
+    """
+    record1 = get_record_from_vid(ctx, vid1)
+    record2 = get_record_from_vid(ctx, vid2)
+
+    subject = "pieces of music"
+    client = OpenAI()
+
+    completion = client.chat.completions.create(
+        model="gpt-4o",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a classifier deciding if two songs are a match or not.",
+            },
+            {
+                "role": "user",
+                "content": f"""Tell me whether the following two records are referring to the same entity or a different entity using a chain of reasoning followed by a single yes or no answer on a single line, without any formatting.
+
+1:  {record1['templated']}
+
+2:  {record2['templated']}
+""",
+            },
+        ],
+    )
+    content = completion.choices[0].message.content
+    print(content)
+    return (
+        check_y_or_n(completion.choices[0].message.content),
+        record1['"TID"'],
+        record2['"TID"'],
+    )
+
+
+def load_ann() -> ANN:
     ctx = df.SessionContext()
 
     print("loading vectors..")
@@ -183,6 +309,27 @@ def load_ann():
     print("loading ann..")
     ann = ANN(vectors, beams=beams, distances=distances, beam_size=32)
     print(ann.dump_logs())
+    return ann
+
+
+def train_weights():
+    ctx = SessionContext()
+    keys = ["__INTERCEPT__"]
+    weights = [0.0]
+    records = ctx.read_parquet("output/records/")
+
+    for key in templates.keys():
+        keys.append(key)
+        weights.append(1.0)
+        field = ctx.read_parquet("output/templated/{key}").select(
+            df.col('"TID"'), df.col("hash"), df.col("templated").alias(key)
+        )
+
+    keys = list(d.keys())
+    candidates = ctx.read_parquet("output/training_set/")
+    templates = ctx.read_parquet("output/index_map/")
+    vectors = ctx.read_parquet("output/vectors/")
+    # left = candidates.join(records, how="left", left_on="left", right_on='"TID"').join(index_map,
 
 
 def main():
@@ -192,6 +339,9 @@ def main():
     vectorize_records()
     average_fields()
     build_index_map()
+    index_field()
+    find_together_and_apart()
+    train_weights()
 
 
 if __name__ == "__main__":
