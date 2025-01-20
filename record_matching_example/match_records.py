@@ -130,20 +130,21 @@ def build_index_map():
     ).write_parquet("output/index_map/")
 
 
-def load_vectors(ctx: df.SessionContext):
+def get_vectors_dataframe(ctx: df.SessionContext) -> df.DataFrame:
     index_map = ctx.read_parquet("output/index_map/")
-    count = index_map.count()
-    embeddings = (
-        index_map.with_column_renamed("hash", "map_hash")
-        .join(
-            ctx.read_parquet("output/vectors/"),
-            left_on="map_hash",
-            right_on="hash",
-            how="left",
-        )
-        .sort(df.col("vector_id"))
-        .select("embedding")
+    return index_map.with_column_renamed("hash", "map_hash").join(
+        ctx.read_parquet("output/vectors/"),
+        left_on="map_hash",
+        right_on="hash",
+        how="left",
     )
+
+
+def load_vectors(ctx: df.SessionContext) -> torch.Tensor:
+    embeddings = (
+        get_vectors_dataframe(ctx).sort(df.col("vector_id")).select(df.col("embedding"))
+    )
+    count = embeddings.count()
 
     vectors = torch.empty((count, 1536), dtype=torch.float32, device="cuda")
     dataframe_to_tensor(embeddings, vectors)
@@ -298,16 +299,14 @@ def load_ann() -> ANN:
     print("loading vectors..")
     vectors = load_vectors(ctx)
     ann_data = ctx.read_parquet("output/ann/")
-    count = ann_data.count()
-    beams = torch.empty((count, 32), dtype=torch.int32, device="cuda")
-    distances = torch.empty((count, 32), dtype=torch.float32, device="cuda")
-    print("loading beams..")
-    dataframe_to_tensor(ann_data.select(df.col("beams")), beams)
-    print("loading distances..")
-    dataframe_to_tensor(ann_data.select(df.col("distances")), distances)
 
+    vectors_dataframe = get_vectors_dataframe(ctx)
+    combined_dataframe = vectors_dataframe.with_column_renamed(
+        "vector_id", "v_vector_id"
+    ).join(ann_data, left_on="v_vector_id", right_on="vector_id", how="left")
     print("loading ann..")
-    ann = ANN(vectors, beams=beams, distances=distances, beam_size=32)
+    ann = ANN.load_from_dataframe(combined_dataframe)
+
     print(ann.dump_logs())
     return ann
 

@@ -805,7 +805,7 @@ wheels = [
 [[package]]
 name = "vectorlink-gpu"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/vectorlink-ai/vectorlink-gpu#cf85680868a587d7a763ce3ea1d6b8fe20f7b63a" }
+source = { git = "ssh://git@github.com/vectorlink-ai/vectorlink-gpu#e27fb11fe977f10650ee0e18110280eaa3c8be5e" }
 dependencies = [
     { name = "datafusion" },
     { name = "numba" },
