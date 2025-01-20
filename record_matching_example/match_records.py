@@ -6,6 +6,7 @@ import torch
 import scipy
 from openai import OpenAI
 import re
+import argparse
 
 from vectorlink_gpu.ann import ANN
 from vectorlink_gpu.datafusion import dataframe_to_tensor, tensor_to_arrow
@@ -331,7 +332,30 @@ def train_weights():
     # left = candidates.join(records, how="left", left_on="left", right_on='"TID"').join(index_map,
 
 
-def search(ctx: df.SessionContext, ann: ANN, query_string: str) -> df.DataFrame:
+def search():
+    parser = argparse.ArgumentParser(usage="search [query] [options]")
+    parser.add_argument("query", help="The query to search for")
+    args = parser.parse_args()
+    ann = load_ann()
+    ctx = df.SessionContext()
+    result = (
+        ann_search(ctx, ann, args.query)
+        .sort(df.col("distance"))
+        .select(
+            df.col("distance"),
+            df.col("title"),
+            df.col("artist"),
+            df.col("album"),
+            df.col("year"),
+            df.col("language"),
+            df.col("length"),
+        )
+    )
+
+    result.show()
+
+
+def ann_search(ctx: df.SessionContext, ann: ANN, query_string: str) -> df.DataFrame:
     client = OpenAI()
 
     response = client.embeddings.create(
