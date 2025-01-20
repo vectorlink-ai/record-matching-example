@@ -331,6 +331,34 @@ def train_weights():
     # left = candidates.join(records, how="left", left_on="left", right_on='"TID"').join(index_map,
 
 
+def search(ctx: df.SessionContext, ann: ANN, query_string: str) -> df.DataFrame:
+    client = OpenAI()
+
+    response = client.embeddings.create(
+        input=query_string, model="text-embedding-3-small"
+    )
+    embedding = response.data[0].embedding
+    query_tensor = torch.tensor(embedding, dtype=torch.float32, device="cuda").reshape(
+        (1, 1536)
+    )
+
+    result = ann.search(query_tensor)
+    matches = pa.array(result.indices.flatten().cpu().numpy())
+    distances = pa.array(result.distances.flatten().cpu().numpy())
+    results = ctx.from_arrow(
+        pa.RecordBatch.from_arrays([matches, distances], ["match", "distance"])
+    )
+
+    records = ctx.read_parquet("output/records/")
+    index_map = ctx.read_parquet("output/index_map")
+
+    return (
+        results.join(index_map, left_on="match", right_on="vector_id")
+        .with_column_renamed('"TID"', "match_tid")
+        .join(records, left_on="match_tid", right_on='"TID"')
+    )
+
+
 def main():
     ingest_csv()
     template_records()
