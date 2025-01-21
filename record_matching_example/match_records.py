@@ -449,9 +449,8 @@ def train_weights():
     coef = logr.coef_[0].astype(np.float32())
     intercept = logr.intercept_.astype(np.float32())
     weights = np.concatenate([intercept, coef])
-    weight_object = dict(zip(["intercept"] + keys, weights))
-    print(weight_object)
-    return (x_train, y_train, logr)
+    weight_object = dict(zip(["intercept"] + keys, map(lambda w: [w], weights)))
+    ctx.from_pydict(weight_object).write_parquet("output/weights")
 
 
 def classify(v1, v2, weights):
@@ -507,13 +506,36 @@ def ann_search(ctx: df.SessionContext, ann: ANN, query_string: str) -> df.DataFr
     )
 
     records = ctx.read_parquet("output/records/")
-    index_map = ctx.read_parquet("output/index_map")
+    index_map = ctx.read_parquet("output/index_map/")
 
     return (
         results.join(index_map, left_on="match", right_on="vector_id")
         .with_column_renamed('"TID"', "match_tid")
         .join(records, left_on="match_tid", right_on='"TID"')
     )
+
+
+def filter_candidates():
+    print("filtering for candidate matches...")
+    ctx = df.SessionContext()
+    ann = load_ann()
+    (vector_count, beam_length) = ann.beams.size()
+    threshold = 0.3
+    index_map = pa.table(ctx.read_parquet("output/index_map")).to_pandas()
+    for i in range(0, vector_count):
+        if i % 1000 == 0:
+            print(f"processing {i}th record")
+        tid1 = index_map[index_map["vector_id"] == i]["TID"].to_numpy()
+        distances = ann.distances[i]
+        positions = (distances < threshold).flatten()
+        indices = ann.beams[i][positions].cpu().detach().numpy()
+        tids = index_map[index_map["vector_id"].isin(indices)]["TID"].to_numpy()
+        results = {"left_tid": tid1.repeat(len(tids)), "right_tid": tids}
+        ctx.from_pydict(results).write_parquet("output/filtered/")
+
+
+def classify_record_matches():
+    df.read_parquet("output/filtered")
 
 
 def main():
@@ -527,6 +549,8 @@ def main():
     discover_training_set()
     calculate_field_distances()
     train_weights()
+    filter_candidates()
+    classify_record_matches()
 
 
 if __name__ == "__main__":
