@@ -1,5 +1,6 @@
 import datafusion as df
 import pyarrow as pa
+import pandas as pd
 from vectorlink_py import template as tpl, dedup, embed, records
 import sys
 import torch
@@ -117,7 +118,7 @@ def average_fields():
     eprintln("averaging (for imputation)...")
     for key in templates.keys():
         records.write_field_averages(
-            ctx, "output/templated", key, "output/vectors/", "output/vector_averages"
+            ctx, "output/templated", key, "output/vectors/", "output/vector_averages/"
         )
 
 
@@ -182,27 +183,32 @@ def discover_training_set():
     """
 
     # 1.
+    print("Loading ann...")
     ann = load_ann()
     distances = ann.distances
     (vector_count, beam_size) = distances.size()
 
     # 2.
+    print("Finding peaks...")
     sample_size = 1000
     sample_size = min(vector_count, sample_size)
-    all_distances = distances[0:sample_size].flatten().sort()
+    (all_distances, _) = distances[0:sample_size].flatten().sort()
     (length,) = all_distances.size()
     tail = all_distances[1:length]
     head = all_distances[0 : length - 1]
     diff = tail - head
     # maybe use smoothing (savitzky_golay?) for smoothing first to remove jitter?
-    (peaks, _) = scipy.signal.find_peaks(diff.numpy)
+    (peaks, _) = scipy.signal.find_peaks(diff.cpu().numpy())
     # Assume first peak is good for now
+    if len(peaks) < 1:
+        raise Exception("Unable to find peaks in derivative of distances")
     first_peak = peaks[0]
     threshold = all_distances[first_peak]
 
     # 3.
+    print("Asking oracle...")
     ctx = df.SessionContext()
-    candidate_size = 1000  # increase for better training
+    candidate_size = 100  # increase for better training
     same = 0
     different = 0
     record = []
@@ -212,17 +218,16 @@ def discover_training_set():
         distance = ann.distances[i]
         indices = (distance > threshold).nonzero()
         (count, _) = indices.size()
-        if indices == 0:
+        if len(indices) == 0:
             continue
         pivot = indices[0][0]
         total = same + different
-        if same_count > total / 2 and pivot < len(distance):
-            last = len(beam) - 1
-            j = beam[last]
+        if same > total / 2 and pivot < len(distance):
+            j = beam[-1]
         else:
-            j = beam[first]
+            j = beam[0]
 
-        (answer, id1, id2) = ask_oracle(ctx, i, j)
+        (answer, id1, id2) = ask_oracle(ctx, int(i), int(j))
         if answer == True:
             same += 1
         else:
@@ -230,12 +235,14 @@ def discover_training_set():
 
         record = {"match": answer, "left": id1, "right": id2}
         candidates.append(record)
+
+    print("Writing results")
     candidates_pd = pd.DataFrame(candidates)
     ctx.from_pandas(candidates_pd).write_parquet("output/training_set/")
 
 
 def get_record_from_vid(ctx, vid) -> str:
-    templated_df = ctx.read_parquet("output/templated/composite").select(
+    templated_df = ctx.read_parquet("output/templated/composite/").select(
         df.col("templated"), df.col('"TID"').alias("tid")
     )
     result = (
@@ -289,8 +296,8 @@ def ask_oracle(ctx, vid1, vid2):
     print(content)
     return (
         check_y_or_n(completion.choices[0].message.content),
-        record1['"TID"'],
-        record2['"TID"'],
+        record1["TID"],
+        record2["TID"],
     )
 
 
@@ -312,24 +319,74 @@ def load_ann() -> ANN:
     return ann
 
 
-def train_weights():
-    ctx = SessionContext()
-    keys = ["__INTERCEPT__"]
-    weights = [0.0]
-    records = ctx.read_parquet("output/records/")
-
+def calculate_field_distances():
+    ctx = df.SessionContext()
+    candidates = ctx.read_parquet("output/training_set/")
+    averages = ctx.read_parquet("output/vector_averages/").to_pandas()
+    vectors = ctx.read_parquet("output/vectors/")
     for key in templates.keys():
-        keys.append(key)
-        weights.append(1.0)
-        field = ctx.read_parquet("output/templated/{key}").select(
+        print(key)
+        average_for_key = pa.array(averages[averages["template"] == key].iloc[0, 1])
+        field = ctx.read_parquet(f"output/templated/{key}/").select(
             df.col('"TID"'), df.col("hash"), df.col("templated").alias(key)
         )
+        left_match = candidates.join(
+            field.select(df.col('"TID"'), df.col("hash").alias("left_hash")),
+            how="left",
+            left_on="left",
+            right_on='"TID"',
+        ).drop("TID")
+        field_match = left_match.join(
+            field.select(df.col('"TID"'), df.col("hash").alias("right_hash")),
+            how="left",
+            left_on="right",
+            right_on='"TID"',
+        )
 
-    keys = list(d.keys())
-    candidates = ctx.read_parquet("output/training_set/")
-    templates = ctx.read_parquet("output/index_map/")
-    vectors = ctx.read_parquet("output/vectors/")
-    # left = candidates.join(records, how="left", left_on="left", right_on='"TID"').join(index_map,
+        vector_comparisons = (
+            field_match.join(
+                vectors.with_column_renamed("embedding", f"left_embedding"),
+                how="left",
+                left_on="left_hash",
+                right_on="hash",
+            )
+            .drop("hash")
+            .join(
+                vectors.with_column_renamed("embedding", "right_embedding"),
+                how="left",
+                left_on="right_hash",
+                right_on="hash",
+            )
+            .select(
+                df.functions.coalesce(
+                    df.col("left_embedding"), df.lit(average_for_key)
+                ).alias(f"left_embedding"),
+                df.functions.coalesce(
+                    df.col("right_embedding"), df.lit(average_for_key)
+                ).alias(f"right_embedding"),
+                df.col("left").alias("left_tid"),
+                df.col("right").alias("right_tid"),
+                df.col("match"),
+            )
+        ).sort(df.col("left_tid"), df.col("right_tid"))
+        size = vector_comparisons.count()
+        left_tensor = torch.empty((size, 1536), dtype=torch.float32, device="cuda")
+        dataframe_to_tensor(
+            vector_comparisons.select(df.col("left_embedding")), left_tensor
+        )
+        right_tensor = torch.empty((size, 1536), dtype=torch.float32, device="cuda")
+        dataframe_to_tensor(
+            vector_comparisons.select(df.col("right_embedding")), right_tensor
+        )
+        distance = 1 - (left_tensor * right_tensor).sum(dim=1) / 2
+        distance_arrow = tensor_to_arrow(distance)
+        distance_table = pa.table(
+            vector_comparisons.select(
+                df.col("left_tid"), df.col("right_tid"), df.lit(key).alias("key")
+            )
+        ).append_column("distance", distance_arrow)
+
+        ctx.from_arrow(distance_table).write_parquet("output/match_field_distances/")
 
 
 def search():
@@ -391,7 +448,8 @@ def main():
     average_fields()
     build_index_map()
     index_field()
-    find_together_and_apart()
+    discover_training_set()
+    calculate_field_distances()
     train_weights()
 
 

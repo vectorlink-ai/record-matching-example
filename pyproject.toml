@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "pandas>=2.2.3",
     "scipy>=1.15.1",
     "vectorlink-gpu",
     "vectorlink-py",
@@ -25,6 +26,7 @@ build-index-map = 'record_matching_example.match_records:build_index_map'
 index-field = 'record_matching_example.match_records:index_field'
 load-ann = 'record_matching_example.match_records:load_ann'
 discover-training-set = 'record_matching_example.match_records:discover_training_set'
+calculate-field-distances = 'record_matching_example.match_records:calculate_field_distances'
 search = 'record_matching_example.match_records:search'
 
 [tool.uv.sources]

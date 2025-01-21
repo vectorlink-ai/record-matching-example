@@ -1,9 +1,6 @@
 version = 1
 requires-python = ">=3.12"
 
-[options]
-prerelease-mode = "allow"
-
 [[package]]
 name = "annotated-types"
 version = "0.7.0"
@@ -193,20 +190,20 @@ wheels = [
 
 [[package]]
 name = "llvmlite"
-version = "0.44.0rc2"
+version = "0.44.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/32/bf/f64a9bc633b0df3b8a596d5c9aafe514e47c8cb19e19b22d1c12240b0816/llvmlite-0.44.0rc2.tar.gz", hash = "sha256:7731d125071842c2465ecd9fd59736da7ae70d8c6d04566ede98296e8779a8ed", size = 171860 }
+sdist = { url = "https://files.pythonhosted.org/packages/89/6a/95a3d3610d5c75293d5dbbb2a76480d5d4eeba641557b69fe90af6c5b84e/llvmlite-0.44.0.tar.gz", hash = "sha256:07667d66a5d150abed9157ab6c0b9393c9356f229784a4385c02f99e94fc94d4", size = 171880 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/81/72/cf6f9584c2f1e4d57ddd7c7cb7fa005e8974063b24a3eafc47b327dace5d/llvmlite-0.44.0rc2-cp312-cp312-macosx_10_14_x86_64.whl", hash = "sha256:4a3022e67e52e01c69145499295d726eb44f8ae14e46a2b87fd334fd5430b14c", size = 28132351 },
-    { url = "https://files.pythonhosted.org/packages/19/e3/f35c6baa8c1c5ded8d353cd103ed10bd6d7f559a90a9d1fa82879fd263f1/llvmlite-0.44.0rc2-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:b775e2c238574fc3b0c58d972db632a85523c8a39d9c45448b272c5c0ddd13b5", size = 26201150 },
-    { url = "https://files.pythonhosted.org/packages/c5/dc/718a6ec3d30ea19674456efc25be9e4cafc63bd3b799e2e0c321f8555cfd/llvmlite-0.44.0rc2-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6e1ff57aa5f7745a4a776c8e91511f4b27614cf942b34bda7739453df8aee8ba", size = 42361911 },
-    { url = "https://files.pythonhosted.org/packages/80/2d/5f358eb2c49b3fe43216594a29b13ae0637c66d27785a38974b6450236d2/llvmlite-0.44.0rc2-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:f2a09df18b9af81157cf889b7db9907708e47daf1e8b939d394a6e1f785c9d41", size = 41184250 },
-    { url = "https://files.pythonhosted.org/packages/18/e0/e8bba0886b3f320b6ea9037e500bbbcc8e0e0de94418d19afa10e87078a7/llvmlite-0.44.0rc2-cp312-cp312-win_amd64.whl", hash = "sha256:e7fedaaa41427bb7f87fa7262e3d1b04d7f279f3f571f7370442f115bf29a5b8", size = 30331237 },
-    { url = "https://files.pythonhosted.org/packages/40/be/5231efff2e2a9f69896b96350b642420866032bd802a84c2e50afaecde88/llvmlite-0.44.0rc2-cp313-cp313-macosx_10_14_x86_64.whl", hash = "sha256:90469b05004a04435377a3de6aee04e12a4f6d2c9a7d62e262681b34a28c7080", size = 28132347 },
-    { url = "https://files.pythonhosted.org/packages/6b/b7/7ac707165c439a346f0d37d8f18e11c3b5b0abbff3b61a80c669fa4a66a1/llvmlite-0.44.0rc2-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:cf3040e9e00e22fd62750e1e045393f0d28ee1c7a92adfc7486b6701c3212a49", size = 26201153 },
-    { url = "https://files.pythonhosted.org/packages/6e/52/15b0cc5316c45613b5ba99a6d4bdafe0339ab18ee06f7e08806b2ebfbada/llvmlite-0.44.0rc2-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:87e9fc737b1323b76a51f18620c41577cbcb5c66f8c83a546431ea562ae1b9d9", size = 42361910 },
-    { url = "https://files.pythonhosted.org/packages/99/da/152e5750bd7f43aab807c784761bd151efa9c2ed7795da83687f1a5d4f27/llvmlite-0.44.0rc2-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:4450f1086db328cdd3a4a1aa9960273730646ee6ff3d4cb99e6e5e17e7872e47", size = 41184249 },
-    { url = "https://files.pythonhosted.org/packages/36/e4/1a01656dc4371dc19a95023378e75aca38d0bdfda0d56b69b66d88883556/llvmlite-0.44.0rc2-cp313-cp313-win_amd64.whl", hash = "sha256:04fde53f84591e13fcd3e89a38159017b3536902c62594418584c796d3d38fc0", size = 30332421 },
+    { url = "https://files.pythonhosted.org/packages/15/86/e3c3195b92e6e492458f16d233e58a1a812aa2bfbef9bdd0fbafcec85c60/llvmlite-0.44.0-cp312-cp312-macosx_10_14_x86_64.whl", hash = "sha256:1d671a56acf725bf1b531d5ef76b86660a5ab8ef19bb6a46064a705c6ca80aad", size = 28132297 },
+    { url = "https://files.pythonhosted.org/packages/d6/53/373b6b8be67b9221d12b24125fd0ec56b1078b660eeae266ec388a6ac9a0/llvmlite-0.44.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:5f79a728e0435493611c9f405168682bb75ffd1fbe6fc360733b850c80a026db", size = 26201105 },
+    { url = "https://files.pythonhosted.org/packages/cb/da/8341fd3056419441286c8e26bf436923021005ece0bff5f41906476ae514/llvmlite-0.44.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c0143a5ef336da14deaa8ec26c5449ad5b6a2b564df82fcef4be040b9cacfea9", size = 42361901 },
+    { url = "https://files.pythonhosted.org/packages/53/ad/d79349dc07b8a395a99153d7ce8b01d6fcdc9f8231355a5df55ded649b61/llvmlite-0.44.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:d752f89e31b66db6f8da06df8b39f9b91e78c5feea1bf9e8c1fba1d1c24c065d", size = 41184247 },
+    { url = "https://files.pythonhosted.org/packages/e2/3b/a9a17366af80127bd09decbe2a54d8974b6d8b274b39bf47fbaedeec6307/llvmlite-0.44.0-cp312-cp312-win_amd64.whl", hash = "sha256:eae7e2d4ca8f88f89d315b48c6b741dcb925d6a1042da694aa16ab3dd4cbd3a1", size = 30332380 },
+    { url = "https://files.pythonhosted.org/packages/89/24/4c0ca705a717514c2092b18476e7a12c74d34d875e05e4d742618ebbf449/llvmlite-0.44.0-cp313-cp313-macosx_10_14_x86_64.whl", hash = "sha256:319bddd44e5f71ae2689859b7203080716448a3cd1128fb144fe5c055219d516", size = 28132306 },
+    { url = "https://files.pythonhosted.org/packages/01/cf/1dd5a60ba6aee7122ab9243fd614abcf22f36b0437cbbe1ccf1e3391461c/llvmlite-0.44.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:9c58867118bad04a0bb22a2e0068c693719658105e40009ffe95c7000fcde88e", size = 26201090 },
+    { url = "https://files.pythonhosted.org/packages/d2/1b/656f5a357de7135a3777bd735cc7c9b8f23b4d37465505bd0eaf4be9befe/llvmlite-0.44.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:46224058b13c96af1365290bdfebe9a6264ae62fb79b2b55693deed11657a8bf", size = 42361904 },
+    { url = "https://files.pythonhosted.org/packages/d8/e1/12c5f20cb9168fb3464a34310411d5ad86e4163c8ff2d14a2b57e5cc6bac/llvmlite-0.44.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:aa0097052c32bf721a4efc03bd109d335dfa57d9bffb3d4c24cc680711b8b4fc", size = 41184245 },
+    { url = "https://files.pythonhosted.org/packages/d0/81/e66fc86539293282fd9cb7c9417438e897f369e79ffb62e1ae5e5154d4dd/llvmlite-0.44.0-cp313-cp313-win_amd64.whl", hash = "sha256:2fb7c4f2fb86cbae6dca3db9ab203eeea0e22d73b99bc2341cdf9de93612e930", size = 30331193 },
 ]
 
 [[package]]
@@ -447,7 +444,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "1.59.7"
+version = "1.59.9"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -459,9 +456,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f9/d5/25cf04789c7929b476c4d9ef711f8979091db63d30bfc093828fe4bf5c72/openai-1.59.7.tar.gz", hash = "sha256:043603def78c00befb857df9f0a16ee76a3af5984ba40cb7ee5e2f40db4646bf", size = 345007 }
+sdist = { url = "https://files.pythonhosted.org/packages/ec/2d/04faa92bac0341649223398503db4415d2f658a757d9d32bb68f3378ddd0/openai-1.59.9.tar.gz", hash = "sha256:ec1a20b0351b4c3e65c6292db71d8233515437c6065efd4fd50edeb55df5f5d2", size = 347134 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6d/47/7b92f1731c227f4139ef0025b5996062e44f9a749c54315c8bdb34bad5ec/openai-1.59.7-py3-none-any.whl", hash = "sha256:cfa806556226fa96df7380ab2e29814181d56fea44738c2b0e581b462c268692", size = 454844 },
+    { url = "https://files.pythonhosted.org/packages/07/b4/57f1954a4560092ad8c45f07ad183eab9c8e093e0a1db829f9b506b2d5d1/openai-1.59.9-py3-none-any.whl", hash = "sha256:61a0608a1313c08ddf92fe793b6dbd1630675a1fe3866b2f96447ce30050c448", size = 455527 },
 ]
 
 [[package]]
@@ -633,6 +630,7 @@ name = "record-matching-example"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "pandas" },
     { name = "scipy" },
     { name = "vectorlink-gpu" },
     { name = "vectorlink-py" },
@@ -640,6 +638,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "pandas", specifier = ">=2.2.3" },
     { name = "scipy", specifier = ">=1.15.1" },
     { name = "vectorlink-gpu", git = "ssh://git@github.com/vectorlink-ai/vectorlink-gpu" },
     { name = "vectorlink-py", git = "ssh://git@github.com/vectorlink-ai/vectorlink.py" },
