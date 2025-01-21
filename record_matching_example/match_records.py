@@ -1,6 +1,9 @@
 import datafusion as df
 import pyarrow as pa
 import pandas as pd
+import numpy as np
+from sklearn import linear_model
+from sklearn import metrics
 from vectorlink_py import template as tpl, dedup, embed, records
 import sys
 import torch
@@ -326,7 +329,9 @@ def calculate_field_distances():
     vectors = ctx.read_parquet("output/vectors/")
     for key in templates.keys():
         print(key)
-        average_for_key = pa.array(averages[averages["template"] == key].iloc[0, 1])
+        average_for_key = pa.array(
+            averages[averages["template"] == key].iloc[0, 1]
+        ).to_numpy()
         field = ctx.read_parquet(f"output/templated/{key}/").select(
             df.col('"TID"'), df.col("hash"), df.col("templated").alias(key)
         )
@@ -387,6 +392,65 @@ def calculate_field_distances():
         ).append_column("distance", distance_arrow)
 
         ctx.from_arrow(distance_table).write_parquet("output/match_field_distances/")
+
+
+def train_weights():
+    """
+    b := weights in order, 1D tensor
+    x := [1.0, distance keys in order], 2D tensor
+    y = sigma( x . b )
+    y_hat := match value, 1D tensor
+    """
+    ctx = df.SessionContext()
+
+    keys = ["__INTERCEPT__"] + sorted(list(templates.keys()))
+    weights = [1.0 for _ in keys]
+
+    b = np.array(weights, dtype=np.float32)
+
+    field_distances = (
+        ctx.read_parquet("output/match_field_distances/")
+        .aggregate(
+            [df.col("left_tid"), df.col("right_tid")],
+            [
+                df.functions.array_agg(
+                    df.col("distance"), order_by=[df.col("key")]
+                ).alias("distances")
+            ],
+        )
+        .sort(df.col("left_tid"), df.col("right_tid"))
+        .select(df.col("distances"))
+    )
+    size = field_distances.count()
+    x_right = torch.empty((size, len(weights) - 1), dtype=torch.float32, device="cuda")
+    dataframe_to_tensor(field_distances, x_right)
+    x_col = torch.ones(size, dtype=torch.float32, device="cuda").unsqueeze(1)
+    # TODO: This is exceptionally silly...
+    # Please create a numpy in the first place.
+    x = torch.concat([x_col, x_right], dim=1).cpu().detach().numpy()
+
+    matches = (
+        ctx.read_parquet("output/training_set/")
+        .sort(df.col("left"), df.col("right"))
+        .select(df.col("match").cast(pa.float32()).alias("y"))
+    )
+    y = matches.to_pandas()["y"].to_numpy()
+
+    training_size = int(size * 2 / 3)
+
+    x_train = x[0:training_size]
+    x_test = x[training_size:]
+
+    y_train = y[0:training_size]
+    y_test = y[training_size:]
+
+    logr = linear_model.LogisticRegression()
+    logr.fit(x_train, y_train)
+
+    y_predicted = logr.predict(x_test)
+    auc = metrics.roc_auc_score(y_test, y_predicted)
+    print(f"ROC AUC: {auc}")
+    return logr
 
 
 def search():
