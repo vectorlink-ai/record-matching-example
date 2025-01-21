@@ -446,7 +446,9 @@ def train_weights():
     auc = metrics.roc_auc_score(y_test, y_predicted)
     print(f"ROC AUC: {auc}")
     d = {}
-    weights = logr.coef_[0].astype(np.float32())
+    coef = logr.coef_[0].astype(np.float32())
+    intercept = logr.intercept_.astype(np.float32())
+    weights = np.concatenate([intercept, coef])
     weight_object = dict(zip(["intercept"] + keys, weights))
     print(weight_object)
     return (x_train, y_train, logr)
@@ -456,7 +458,8 @@ def classify(v1, v2, weights):
     x = (1 - (v1 * v2).sum(dim=2)) / 2
     batch_size = x.size()[0]
     x = torch.concat(
-        [torch.ones(batch_size, dtype=torch.float32, device="cuda").expand(1), x], dim=1
+        [torch.ones(batch_size, dtype=torch.float32, device="cuda").unsqueeze(1), x],
+        dim=1,
     )
     y_hat = torch.special.expit((x * weights).sum(dim=1))
     return y_hat
