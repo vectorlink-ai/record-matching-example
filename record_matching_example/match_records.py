@@ -402,11 +402,7 @@ def train_weights():
     y_hat := match value, 1D tensor
     """
     ctx = df.SessionContext()
-
-    keys = ["__INTERCEPT__"] + sorted(list(templates.keys()))
-    weights = [1.0 for _ in keys]
-
-    b = np.array(weights, dtype=np.float32)
+    keys = sorted(list(templates.keys()))
 
     field_distances = (
         ctx.read_parquet("output/match_field_distances/")
@@ -422,12 +418,11 @@ def train_weights():
         .select(df.col("distances"))
     )
     size = field_distances.count()
-    x_right = torch.empty((size, len(weights) - 1), dtype=torch.float32, device="cuda")
-    dataframe_to_tensor(field_distances, x_right)
-    x_col = torch.ones(size, dtype=torch.float32, device="cuda").unsqueeze(1)
+    x = torch.empty((size, len(keys)), dtype=torch.float32, device="cuda")
+    dataframe_to_tensor(field_distances, x)
     # TODO: This is exceptionally silly...
     # Please create a numpy in the first place.
-    x = torch.concat([x_col, x_right], dim=1).cpu().detach().numpy()
+    x = x.cpu().detach().numpy()
 
     matches = (
         ctx.read_parquet("output/training_set/")
@@ -450,6 +445,10 @@ def train_weights():
     y_predicted = logr.predict(x_test)
     auc = metrics.roc_auc_score(y_test, y_predicted)
     print(f"ROC AUC: {auc}")
+    d = {}
+    weights = logr.coef_[0]
+    weight_object = dict(zip(["intercept"] + keys, weights))
+    print(weight_object)
     return logr
 
 
