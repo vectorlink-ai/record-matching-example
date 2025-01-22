@@ -733,6 +733,14 @@ def calculate_adjusted_rand_score():
     return score
 
 
+def recall():
+    pass
+
+
+def precision():
+    pass
+
+
 def main():
     ingest_csv()
     template_records()
