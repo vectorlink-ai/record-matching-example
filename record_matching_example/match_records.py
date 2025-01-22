@@ -252,7 +252,7 @@ def discover_training_set():
     # 3.
     print("Asking oracle...")
     ctx = df.SessionContext()
-    candidate_size = 100  # increase for better training
+    candidate_size = 1000  # increase for better training
     same = 0
     different = 0
     record = []
