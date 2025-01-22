@@ -372,6 +372,7 @@ def candidate_field_distances(ctx, candidates: df.DataFrame, destination: str):
             )
         ).sort(df.col("left_tid"), df.col("right_tid"))
         size = vector_comparisons.count()
+        print(f"total comparisons: {size}")
         left_tensor = torch.empty((size, 1536), dtype=torch.float32, device="cuda")
         dataframe_to_tensor(
             vector_comparisons.select(df.col("left_embedding")), left_tensor
@@ -510,7 +511,7 @@ def filter_candidates():
     ctx = df.SessionContext()
     ann = load_ann()
     (vector_count, beam_length) = ann.beams.size()
-    threshold = 0.5
+    threshold = 0.3
     index_map = pa.table(ctx.read_parquet("output/index_map")).to_pandas()
     left = []
     right = []
