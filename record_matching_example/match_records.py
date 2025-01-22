@@ -596,10 +596,11 @@ def classify_record_matches():
 
 
 def build_clusters():
+    inclusion_threshold = 0.6
     ctx = context.build_session_context()
     ids = ctx.table("records").select(df.col('"TID"')).to_pydict()["TID"]
     disjoint_set = scipy.cluster.hierarchy.DisjointSet(ids)
-    matches = ctx.table("prediction").filter(df.col("prediction") > 0.5)
+    matches = ctx.table("prediction").filter(df.col("prediction") > inclusion_threshold)
     for batch in matches.execute_stream():
         batch = batch.to_pyarrow().to_pandas()
         for _, record in batch.iterrows():
@@ -637,7 +638,7 @@ def embedding_for_tid(ctx: df.SessionContext, key: str, tid: int) -> np.ndarray:
     )
 
     if len(embedding) == 0:
-        print(average_for_key)
+        print(f"using average for {key} on {tid}")
         return average_for_key
     else:
         return embedding[0]
