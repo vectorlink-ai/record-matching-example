@@ -5,12 +5,14 @@ import numpy as np
 from sklearn import linear_model
 from sklearn import metrics
 from vectorlink_py import template as tpl, dedup, embed, records
+from vectorlink_py.utils import name_to_torch_type
 import sys
 import torch
 import scipy
 from openai import OpenAI
 import re
 import argparse
+from typing import Optional, Dict
 
 from vectorlink_gpu.ann import ANN
 from vectorlink_gpu.datafusion import dataframe_to_tensor, tensor_to_arrow
@@ -114,13 +116,52 @@ def vectorize_records():
     embed.vectorize(ctx, "output/dedup/", "output/vectors/")
 
 
+def write_field_averages(
+    ctx: df.SessionContext,
+    template_source: str,
+    key: str,
+    vector_source: str,
+    destination: str,
+):
+    fv = field_vectors(ctx, f"{template_source}/{key}/", vector_source)
+    average = torch.mean(fv, 0).cpu().detach().numpy()
+    pandas_df = pd.DataFrame({"template": [key], "average": [average]})
+    datafusion_df = ctx.from_arrow(pandas_df)
+    datafusion_df.write_parquet(destination)
+
+
+def field_vectors(
+    ctx: df.SessionContext,
+    source: str,
+    vector_source: str,
+    configuration: Optional[Dict] = None,
+) -> torch.Tensor:
+    if configuration is None:
+        # defaults to OpenAI dimensions / datatype
+        configuration = {"dimensions": 1536, "field_type": "float32"}
+    template_df: df.DataFrame = ctx.read_parquet(source)
+    vector_df: df.DataFrame = ctx.read_parquet(vector_source).select(
+        df.col("hash").alias("embedding_hash"), df.col("embedding")
+    )
+    result = template_df.join(
+        vector_df, left_on="hash", right_on="embedding_hash", how="inner"
+    ).select(df.col("embedding"))
+    size = result.count()
+    dim = configuration["dimensions"]
+    field_type = configuration["field_type"]
+    dtype = name_to_torch_type(field_type)
+    tensor = torch.empty((size, dim), dtype=dtype, device="cuda")
+    dataframe_to_tensor(result, tensor)
+    return tensor
+
+
 def average_fields():
     sc = df.SessionConfig().with_batch_size(10)
     ctx = df.SessionContext(config=sc)
 
     eprintln("averaging (for imputation)...")
     for key in templates.keys():
-        records.write_field_averages(
+        write_field_averages(
             ctx, "output/templated", key, "output/vectors/", "output/vector_averages/"
         )
 
@@ -640,7 +681,6 @@ def calculate_record_distance(left: int, right: int) -> float:
     vectors = ctx.read_parquet("output/vectors/")
     keys = sorted(list(templates.keys()))
     for key in keys:
-        print(key)
         left_embedding = embedding_for_tid(ctx, key, left)
         right_embedding = embedding_for_tid(ctx, key, right)
 
