@@ -692,6 +692,24 @@ def calculate_record_distance(left: int, right: int) -> float:
     return scipy.special.expit((distances * weights).sum())
 
 
+def calculate_expanded_match(frame: df.DataFrame) -> df.DataFrame:
+    right_frame = frame.with_column_renamed(
+        "cluster_id", "right_cluster_id"
+    ).with_column_renamed("cluster_element", "right_cluster_element")
+
+    return (
+        frame.join(
+            right_frame, how="inner", left_on="cluster_id", right_on="right_cluster_id"
+        )
+        .filter(df.col("cluster_element") < df.col("right_cluster_element"))
+        .select(
+            df.col("cluster_element").alias("left"),
+            df.col("right_cluster_element").alias("right"),
+        )
+        .sort(df.col("left"), df.col("right"))
+    )
+
+
 def main():
     ingest_csv()
     template_records()
