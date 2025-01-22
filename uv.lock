@@ -1,6 +1,9 @@
 version = 1
 requires-python = ">=3.12"
 
+[options]
+prerelease-mode = "allow"
+
 [[package]]
 name = "annotated-types"
 version = "0.7.0"
@@ -79,11 +82,11 @@ wheels = [
 
 [[package]]
 name = "filelock"
-version = "3.16.1"
+version = "3.17.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/9d/db/3ef5bb276dae18d6ec2124224403d1d67bccdbefc17af4cc8f553e341ab1/filelock-3.16.1.tar.gz", hash = "sha256:c249fbfcd5db47e5e2d6d62198e565475ee65e4831e2561c8e313fa7eb961435", size = 18037 }
+sdist = { url = "https://files.pythonhosted.org/packages/dc/9c/0b15fb47b464e1b663b1acd1253a062aa5feecb07d4e597daea542ebd2b5/filelock-3.17.0.tar.gz", hash = "sha256:ee4e77401ef576ebb38cd7f13b9b28893194acc20a8e68e18730ba9c0e54660e", size = 18027 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b9/f8/feced7779d755758a52d1f6635d990b8d98dc0a29fa568bbe0625f18fdf3/filelock-3.16.1-py3-none-any.whl", hash = "sha256:2082e5703d51fbf98ea75855d9d5527e33d8ff23099bec374a134febee6946b0", size = 16163 },
+    { url = "https://files.pythonhosted.org/packages/89/ec/00d68c4ddfedfe64159999e5f8a98fb8442729a63e2077eb9dcd89623d27/filelock-3.17.0-py3-none-any.whl", hash = "sha256:533dc2f7ba78dc2f0f531fc6c4940addf7b70a481e269a5a3b93be94ffbe8338", size = 16164 },
 ]
 
 [[package]]
@@ -453,7 +456,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "1.59.9"
+version = "1.60.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -465,9 +468,9 @@ dependencies = [
     { name = "tqdm" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ec/2d/04faa92bac0341649223398503db4415d2f658a757d9d32bb68f3378ddd0/openai-1.59.9.tar.gz", hash = "sha256:ec1a20b0351b4c3e65c6292db71d8233515437c6065efd4fd50edeb55df5f5d2", size = 347134 }
+sdist = { url = "https://files.pythonhosted.org/packages/d4/2d/9bdf4435d7669b4d027d6d69b4ac82f6be76153d9e90d3155d4224626a29/openai-1.60.0.tar.gz", hash = "sha256:7fa536cd4b644718645b874d2706e36dbbef38b327e42ca0623275da347ee1a9", size = 347844 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/07/b4/57f1954a4560092ad8c45f07ad183eab9c8e093e0a1db829f9b506b2d5d1/openai-1.59.9-py3-none-any.whl", hash = "sha256:61a0608a1313c08ddf92fe793b6dbd1630675a1fe3866b2f96447ce30050c448", size = 455527 },
+    { url = "https://files.pythonhosted.org/packages/c0/53/782008d94f5f3141795e65bd7f87afaebb97e7516342299c1b1a08d5aaf8/openai-1.60.0-py3-none-any.whl", hash = "sha256:df06c43be8018274980ac363da07d4b417bd835ead1c66e14396f6f15a0d5dda", size = 456109 },
 ]
 
 [[package]]
@@ -842,17 +845,17 @@ wheels = [
 
 [[package]]
 name = "tzdata"
-version = "2024.2"
+version = "2025.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e1/34/943888654477a574a86a98e9896bae89c7aa15078ec29f490fef2f1e5384/tzdata-2024.2.tar.gz", hash = "sha256:7d85cc416e9382e69095b7bdf4afd9e3880418a2413feec7069d533d6b4e31cc", size = 193282 }
+sdist = { url = "https://files.pythonhosted.org/packages/43/0f/fa4723f22942480be4ca9527bbde8d43f6c3f2fe8412f00e7f5f6746bc8b/tzdata-2025.1.tar.gz", hash = "sha256:24894909e88cdb28bd1636c6887801df64cb485bd593f2fd83ef29075a81d694", size = 194950 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a6/ab/7e5f53c3b9d14972843a647d8d7a853969a58aecc7559cb3267302c94774/tzdata-2024.2-py2.py3-none-any.whl", hash = "sha256:a48093786cdcde33cad18c2555e8532f34422074448fbc874186f0abd79565cd", size = 346586 },
+    { url = "https://files.pythonhosted.org/packages/0f/dd/84f10e23edd882c6f968c21c2434fe67bd4a528967067515feca9e611e5e/tzdata-2025.1-py2.py3-none-any.whl", hash = "sha256:7e127113816800496f027041c570f50bcd464a020098a3b6b199517772303639", size = 346762 },
 ]
 
 [[package]]
 name = "vectorlink-gpu"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/vectorlink-ai/vectorlink-gpu#fc674aa7f2ce9bccd4716471be19792c98dc69b5" }
+source = { git = "ssh://git@github.com/vectorlink-ai/vectorlink-gpu#9e3b22f7331b485a008ebc5647921509a2941bd0" }
 dependencies = [
     { name = "datafusion" },
     { name = "numba" },
@@ -863,7 +866,7 @@ dependencies = [
 [[package]]
 name = "vectorlink-py"
 version = "0.1.0"
-source = { git = "ssh://git@github.com/vectorlink-ai/vectorlink.py#70e1976b4573c3258c7ecacafe93a4f0ee5e4985" }
+source = { git = "ssh://git@github.com/vectorlink-ai/vectorlink.py#de0b3b8ac87b6043e6b5d460ecf671b535f0ce62" }
 dependencies = [
     { name = "backoff" },
     { name = "datafusion" },

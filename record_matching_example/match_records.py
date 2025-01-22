@@ -20,6 +20,8 @@ from vectorlink_gpu.datafusion import dataframe_to_tensor, tensor_to_arrow
 from sklearn.utils import shuffle
 from sklearn.metrics.cluster import adjusted_rand_score
 
+from . import context
+
 """
 Matching process
 
@@ -46,23 +48,6 @@ templates["composite"] = (
     f"{templates['title']}{templates['artist']}{templates['album']}{templates['year']}{templates['language']}"
 )
 
-INPUT_CSV_SCHEMA = pa.schema(
-    [
-        pa.field("TID", pa.int64(), nullable=False),
-        pa.field("CID", pa.int64(), nullable=False),
-        pa.field("CTID", pa.int64(), nullable=False),
-        pa.field("SourceID", pa.int64(), nullable=False),
-        pa.field("id", pa.string(), nullable=True),
-        pa.field("number", pa.string(), nullable=True),
-        pa.field("title", pa.string(), nullable=True),
-        pa.field("length", pa.string(), nullable=True),
-        pa.field("artist", pa.string(), nullable=True),
-        pa.field("album", pa.string(), nullable=True),
-        pa.field("year", pa.string(), nullable=True),
-        pa.field("language", pa.string(), nullable=True),
-    ]
-)
-
 
 def eprintln(string):
     print(string, file=sys.stderr)
@@ -70,19 +55,17 @@ def eprintln(string):
 
 def ingest_csv():
     eprintln("ingesting csv to parquet...")
-    sc = df.SessionConfig().with_batch_size(10)
-    ctx = df.SessionContext(config=sc)
+    ctx = context.build_session_context()
     dataframe = ctx.read_csv(
-        INPUT_CSV_PATH, file_extension=".dapo", schema=INPUT_CSV_SCHEMA
+        INPUT_CSV_PATH, file_extension=".dapo", schema=context.RECORD_SCHEMA
     )
 
     dataframe.write_parquet("output/records/")
 
 
 def template_records():
-    sc = df.SessionConfig().with_batch_size(10)
-    ctx = df.SessionContext(config=sc)
-    dataframe = ctx.read_parquet("output/records/")
+    ctx = context.build_session_context()
+    dataframe = ctx.table("records")
 
     eprintln("templating...")
     tpl.write_templated_fields(
@@ -103,17 +86,14 @@ def template_records():
 
 
 def dedup_records():
-    sc = df.SessionConfig().with_batch_size(10)
-    ctx = df.SessionContext(config=sc)
+    ctx = context.build_session_context()
 
     eprintln("dedupping...")
-    for key in templates.keys():
-        dedup.dedup_from_into(ctx, f"output/templated/{key}/", "output/dedup/")
+    dedup.dedup_from_into(ctx, f"output/templated/", "output/dedup/")
 
 
 def vectorize_records():
-    sc = df.SessionConfig().with_batch_size(10)
-    ctx = df.SessionContext(config=sc)
+    ctx = context.build_session_context()
 
     eprintln("vectorizing...")
     embed.vectorize(ctx, "output/dedup/", "output/vectors/")
@@ -121,12 +101,10 @@ def vectorize_records():
 
 def write_field_averages(
     ctx: df.SessionContext,
-    template_source: str,
     key: str,
-    vector_source: str,
     destination: str,
 ):
-    fv = field_vectors(ctx, f"{template_source}/{key}/", vector_source)
+    fv = field_vectors(ctx, key)
     average = torch.mean(fv, 0).cpu().detach().numpy()
     pandas_df = pd.DataFrame({"template": [key], "average": [average]})
     datafusion_df = ctx.from_arrow(pandas_df)
@@ -135,20 +113,17 @@ def write_field_averages(
 
 def field_vectors(
     ctx: df.SessionContext,
-    source: str,
-    vector_source: str,
+    key: str,
     configuration: Optional[Dict] = None,
 ) -> torch.Tensor:
     if configuration is None:
         # defaults to OpenAI dimensions / datatype
         configuration = {"dimensions": 1536, "field_type": "float32"}
-    template_df: df.DataFrame = ctx.read_parquet(source)
-    vector_df: df.DataFrame = ctx.read_parquet(vector_source).select(
-        df.col("hash").alias("embedding_hash"), df.col("embedding")
+    result = (
+        ctx.table("templated_vectors")
+        .filter(df.col("key") == key)
+        .select(df.col("embedding"))
     )
-    result = template_df.join(
-        vector_df, left_on="hash", right_on="embedding_hash", how="inner"
-    ).select(df.col("embedding"))
     size = result.count()
     dim = configuration["dimensions"]
     field_type = configuration["field_type"]
@@ -159,39 +134,30 @@ def field_vectors(
 
 
 def average_fields():
-    sc = df.SessionConfig().with_batch_size(10)
-    ctx = df.SessionContext(config=sc)
+    ctx = context.build_session_context()
 
     eprintln("averaging (for imputation)...")
     for key in templates.keys():
-        write_field_averages(
-            ctx, "output/templated", key, "output/vectors/", "output/vector_averages/"
-        )
+        write_field_averages(ctx, key, "output/vector_averages/")
 
 
 def build_index_map():
-    ctx = df.SessionContext()
+    ctx = context.build_session_context()
 
-    ctx.read_parquet("output/templated/composite").sort(df.col("hash")).select(
+    ctx.table("templated").filter(df.col("key") == "composite").sort(
+        df.col("hash")
+    ).select(
         (df.functions.row_number() - 1).alias("vector_id"),
         df.col('"TID"'),
         df.col("hash"),
-    ).write_parquet("output/index_map/")
-
-
-def get_vectors_dataframe(ctx: df.SessionContext) -> df.DataFrame:
-    index_map = ctx.read_parquet("output/index_map/")
-    return index_map.with_column_renamed("hash", "map_hash").join(
-        ctx.read_parquet("output/vectors/"),
-        left_on="map_hash",
-        right_on="hash",
-        how="left",
+    ).write_parquet(
+        "output/index_map/"
     )
 
 
 def load_vectors(ctx: df.SessionContext) -> torch.Tensor:
     embeddings = (
-        get_vectors_dataframe(ctx).sort(df.col("vector_id")).select(df.col("embedding"))
+        ctx.table("index_vectors").sort(df.col("vector_id")).select(df.col("embedding"))
     )
     count = embeddings.count()
 
@@ -202,7 +168,7 @@ def load_vectors(ctx: df.SessionContext) -> torch.Tensor:
 
 
 def index_field():
-    ctx = df.SessionContext()
+    ctx = context.build_session_context()
     vectors = load_vectors(ctx)
 
     ann = ANN(vectors, beam_size=32)
@@ -254,7 +220,7 @@ def discover_training_set():
 
     # 3.
     print("Asking oracle...")
-    ctx = df.SessionContext()
+    ctx = context.build_session_context()
     candidate_size = 1000  # increase for better training
     same = 0
     different = 0
@@ -289,11 +255,13 @@ def discover_training_set():
 
 
 def get_record_from_vid(ctx, vid) -> str:
-    templated_df = ctx.read_parquet("output/templated/composite/").select(
-        df.col("templated"), df.col('"TID"').alias("tid")
+    templated_df = (
+        ctx.table("templated")
+        .filter(df.col("key") == "composite")
+        .select(df.col("templated"), df.col('"TID"').alias("tid"))
     )
     result = (
-        ctx.read_parquet("output/index_map/")
+        ctx.table("index_map")
         .filter(vid == df.col("vector_id"))
         .join(templated_df, left_on='"TID"', right_on="tid", how="inner")
         .select(df.col('"TID"'), df.col("templated"))
@@ -349,33 +317,27 @@ def ask_oracle(ctx, vid1, vid2):
 
 
 def load_ann() -> ANN:
-    ctx = df.SessionContext()
+    ctx = context.build_session_context()
 
-    print("loading vectors..")
-    vectors = load_vectors(ctx)
-    ann_data = ctx.read_parquet("output/ann/")
-
-    vectors_dataframe = get_vectors_dataframe(ctx)
-    combined_dataframe = vectors_dataframe.with_column_renamed(
-        "vector_id", "v_vector_id"
-    ).join(ann_data, left_on="v_vector_id", right_on="vector_id", how="left")
     print("loading ann..")
-    ann = ANN.load_from_dataframe(combined_dataframe)
+    ann = ANN.load_from_dataframe(ctx.table("total_ann"))
 
     print(ann.dump_logs())
     return ann
 
 
 def candidate_field_distances(ctx, candidates: df.DataFrame, destination: str):
-    averages = ctx.read_parquet("output/vector_averages/").to_pandas()
-    vectors = ctx.read_parquet("output/vectors/")
+    averages = ctx.table("vector_averages").to_pandas()
+    vectors = ctx.table("vectors")
     for key in templates.keys():
         print(f"processing key {key}")
         average_for_key = pa.array(
             averages[averages["template"] == key].iloc[0, 1]
         ).to_numpy()
-        field = ctx.read_parquet(f"output/templated/{key}/").select(
-            df.col('"TID"'), df.col("hash"), df.col("templated").alias(key)
+        field = (
+            ctx.table("templated")
+            .filter(df.col("key") == key)
+            .select(df.col('"TID"'), df.col("hash"), df.col("templated").alias(key))
         )
         left_match = candidates.join(
             field.select(df.col('"TID"'), df.col("hash").alias("left_hash")),
@@ -440,8 +402,8 @@ def candidate_field_distances(ctx, candidates: df.DataFrame, destination: str):
 
 def calculate_training_field_distances():
     print("Calculating training field distances...")
-    ctx = df.SessionContext()
-    candidates = ctx.read_parquet("output/training_set/")
+    ctx = context.build_session_context()
+    candidates = ctx.table("training_set")
     candidate_field_distances(ctx, candidates, "output/match_field_distances/")
 
 
@@ -452,16 +414,16 @@ def train_weights():
     y = sigma( x . b )
     y_hat := match value, 1D tensor
     """
-    ctx = df.SessionContext()
+    ctx = context.build_session_context()
     keys = sorted(list(templates.keys()))
 
-    field_distances = ctx.read_parquet("output/match_field_distances/")
+    field_distances = ctx.table("match_field_distances")
     x = get_field_distances(ctx, field_distances)
     (batch_size, _) = x.size()
     x = x.cpu().detach().numpy()
 
     matches = (
-        ctx.read_parquet("output/training_set/")
+        ctx.table("training_set")
         .sort(df.col("left"), df.col("right"))
         .select(df.col("match").cast(pa.float32()).alias("y"))
     )
@@ -491,8 +453,8 @@ def train_weights():
 
 
 def show_weights() -> df.DataFrame:
-    ctx = df.SessionContext()
-    return ctx.read_parquet("output/weights")
+    ctx = context.build_session_context()
+    return ctx.table("weights")
 
 
 def classify(x, weights):
@@ -510,7 +472,7 @@ def search():
     parser.add_argument("query", help="The query to search for")
     args = parser.parse_args()
     ann = load_ann()
-    ctx = df.SessionContext()
+    ctx = context.build_session_context()
     result = (
         ann_search(ctx, ann, args.query)
         .sort(df.col("distance"))
@@ -546,8 +508,8 @@ def ann_search(ctx: df.SessionContext, ann: ANN, query_string: str) -> df.DataFr
         pa.RecordBatch.from_arrays([matches, distances], ["match", "distance"])
     )
 
-    records = ctx.read_parquet("output/records/")
-    index_map = ctx.read_parquet("output/index_map/")
+    records = ctx.table("records")
+    index_map = ctx.table("index_map")
 
     return (
         results.join(index_map, left_on="match", right_on="vector_id")
@@ -558,11 +520,11 @@ def ann_search(ctx: df.SessionContext, ann: ANN, query_string: str) -> df.DataFr
 
 def filter_candidates():
     print("filtering for candidate matches...")
-    ctx = df.SessionContext()
+    ctx = context.build_session_context()
     ann = load_ann()
     (vector_count, beam_length) = ann.beams.size()
     threshold = 0.3
-    index_map = pa.table(ctx.read_parquet("output/index_map")).to_pandas()
+    index_map = pa.table(ctx.table("index_map")).to_pandas()
     left = []
     right = []
     for i in range(0, vector_count):
@@ -586,8 +548,8 @@ def filter_candidates():
 
 def calculate_field_distances():
     print("Calculating filter candidate field distances...")
-    ctx = df.SessionContext()
-    candidates = ctx.read_parquet("output/filtered/")
+    ctx = context.build_session_context()
+    candidates = ctx.table("filtered")
     candidate_field_distances(ctx, candidates, "output/field_distances/")
 
 
@@ -612,36 +574,32 @@ def get_field_distances(ctx, source: df.DataFrame) -> torch.Tensor:
 
 def classify_record_matches():
     print("Classifying record matches...")
-    ctx = df.SessionContext()
+    ctx = context.build_session_context()
     vectors = load_vectors(ctx)
 
     weights = torch.tensor(
-        ctx.read_parquet("output/weights").to_pandas().to_numpy()[0],
+        ctx.table("weights").to_pandas().to_numpy()[0],
         dtype=torch.float32,
         device="cuda",
     )
 
-    field_distances = ctx.read_parquet("output/field_distances/")
+    field_distances = ctx.table("field_distances")
     (weight_count,) = weights.size()
     key_count = weight_count - 1  # minus intercept
     x = get_field_distances(ctx, field_distances)
     print("beginning classification...")
     y_hat = classify(x, weights)
-    filtered = (
-        ctx.read_parquet("output/filtered/")
-        .sort(df.col("left"), df.col("right"))
-        .to_pandas()
-    )
+    filtered = ctx.table("filtered").sort(df.col("left"), df.col("right")).to_pandas()
     filtered["prediction"] = y_hat.cpu().detach().numpy()
     print("writing predictions...")
     ctx.from_pandas(filtered).write_parquet("output/prediction")
 
 
 def build_clusters():
-    ctx = df.SessionContext()
-    ids = ctx.read_parquet("output/records/").select(df.col('"TID"')).to_pydict()["TID"]
+    ctx = context.build_session_context()
+    ids = ctx.table("records").select(df.col('"TID"')).to_pydict()["TID"]
     disjoint_set = scipy.cluster.hierarchy.DisjointSet(ids)
-    matches = ctx.read_parquet("output/prediction/").filter(df.col("prediction") > 0.5)
+    matches = ctx.table("prediction").filter(df.col("prediction") > 0.5)
     for batch in matches.execute_stream():
         batch = batch.to_pyarrow().to_pandas()
         for _, record in batch.iterrows():
@@ -662,13 +620,14 @@ def build_clusters():
 
 
 def embedding_for_tid(ctx: df.SessionContext, key: str, tid: int) -> np.ndarray:
-    averages = ctx.read_parquet("output/vector_averages/").to_pandas()
-    vectors = ctx.read_parquet("output/vectors/")
+    averages = ctx.table("vector_averages").to_pandas()
+    vectors = ctx.table("vectors")
     average_for_key = pa.array(
         averages[averages["template"] == key].iloc[0, 1]
     ).to_numpy()
     embedding = (
-        ctx.read_parquet(f"output/templated/{key}/")
+        ctx.table("templated")
+        .filter(df.col("key") == key)
         .select(df.col('"TID"'), df.col("hash").alias("field_hash"))
         .filter(df.col('"TID"') == tid)
         .join(vectors, how="inner", left_on="field_hash", right_on="hash")
@@ -685,9 +644,9 @@ def embedding_for_tid(ctx: df.SessionContext, key: str, tid: int) -> np.ndarray:
 
 
 def calculate_record_distance(left: int, right: int) -> float:
-    ctx = df.SessionContext()
+    ctx = context.build_session_context()
     distances = [1.0]
-    vectors = ctx.read_parquet("output/vectors/")
+    vectors = ctx.table("vectors")
     keys = sorted(list(templates.keys()))
     for key in keys:
         left_embedding = embedding_for_tid(ctx, key, left)
@@ -696,7 +655,7 @@ def calculate_record_distance(left: int, right: int) -> float:
         distance = (1 - (left_embedding * right_embedding).sum()) / 2
         distances.append(distance)
 
-    weights = ctx.read_parquet("output/weights").to_pandas().to_numpy()[0]
+    weights = ctx.table("weights").to_pandas().to_numpy()[0]
 
     return scipy.special.expit((distances * weights).sum())
 
@@ -720,16 +679,11 @@ def calculate_expanded_match(frame: df.DataFrame) -> df.DataFrame:
 
 
 def calculate_adjusted_rand_score():
-    ctx = df.SessionContext()
-    orig = (
-        ctx.read_parquet("output/records/")
-        .sort(df.col('"TID"'))
-        .select('"CID"')
-        .to_pydict()["CID"]
-    )
+    ctx = context.build_session_context()
+    orig = ctx.table("records").sort(df.col('"TID"')).select('"CID"').to_pydict()["CID"]
 
     ours = (
-        ctx.read_parquet("output/clusters/")
+        ctx.table("clusters")
         .sort(df.col("cluster_element"))
         .select("cluster_id")
         .to_pydict()["cluster_id"]
@@ -741,9 +695,9 @@ def calculate_adjusted_rand_score():
 
 
 def recall():
-    ctx = df.SessionContext()
+    ctx = context.build_session_context()
 
-    records = ctx.read_parquet("output/records/")
+    records = ctx.table("records")
     original_match = (
         records.select(df.col('"TID"').alias("left"), df.col('"CID"').alias("cid_left"))
         .join(
@@ -761,7 +715,7 @@ def recall():
         )
     )
 
-    clusters = ctx.read_parquet("output/clusters/")
+    clusters = ctx.table("clusters")
     our_match = (
         clusters.select(
             df.col("cluster_element").alias("left"),

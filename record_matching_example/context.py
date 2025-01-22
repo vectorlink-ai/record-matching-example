@@ -115,19 +115,16 @@ VECTOR_AVERAGES_SCHEMA = pa.schema(
     ]
 )
 
-# todo this is now in both context and match_records. it'd be weird to have the templates here but we do need to know the names if we're not able to partition
-template_names = ["title", "artist", "album", "year", "language", "composite"]
-
 
 def build_session_context(location="output/") -> df.SessionContext:
     ctx = df.SessionContext()
     ctx.register_parquet("records", f"{location}records/", schema=RECORD_SCHEMA)
-    for template_name in template_names:
-        ctx.register_parquet(
-            f"templated_{template_name}",
-            f"{location}templated/{template_name}/",
-            schema=TEMPLATED_SCHEMA,
-        )
+    ctx.register_parquet(
+        f"templated",
+        f"{location}templated/",
+        schema=TEMPLATED_SCHEMA,
+        table_partition_cols=[("key", "string")],
+    )
 
     ctx.register_parquet("dedup", f"{location}dedup/", schema=DEDUP_SCHEMA)
     ctx.register_parquet("index_map", f"{location}index_map/", schema=INDEX_MAP_SCHEMA)
@@ -152,13 +149,25 @@ def build_session_context(location="output/") -> df.SessionContext:
     ctx.register_parquet("filtered", f"{location}filtered/", schema=FILTERED_SCHEMA)
 
     ctx.register_parquet(
-        "predictions", f"{location}prediction/", schema=PREDICTION_SCHEMA
+        "prediction", f"{location}prediction/", schema=PREDICTION_SCHEMA
     )
 
     ctx.register_parquet("clusters", f"{location}clusters/", schema=CLUSTERS_SCHEMA)
 
     ctx.register_parquet(
         "vector_averages", f"{location}vector_averages/", schema=VECTOR_AVERAGES_SCHEMA
+    )
+
+    ctx.sql(
+        'CREATE VIEW templated_vectors AS SELECT templated."TID",templated.key,templated.templated,vectors.embedding FROM templated LEFT JOIN vectors ON (templated.hash = vectors.hash)'
+    )
+
+    ctx.sql(
+        'CREATE VIEW index_vectors AS SELECT index_map.vector_id,index_map."TID", vectors.embedding FROM index_map LEFT JOIN vectors ON (index_map.hash = vectors.hash)'
+    )
+
+    ctx.sql(
+        'CREATE VIEW total_ann AS SELECT index_vectors.vector_id,index_vectors."TID", index_vectors.embedding, ann.beams, ann.distances FROM index_vectors LEFT JOIN ann ON (index_vectors.vector_id = ann.vector_id)'
     )
 
     return ctx
