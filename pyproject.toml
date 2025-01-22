@@ -35,6 +35,8 @@ classify-record-matches = 'record_matching_example.match_records:classify_record
 search = 'record_matching_example.match_records:search'
 build-clusters = 'record_matching_example.match_records:build_clusters'
 adjusted-rand-score = 'record_matching_example.match_records:calculate_adjusted_rand_score'
+show-weights = 'record_matching_example.match_records:show_weights'
+recall = 'record_matching_example.match_records:recall'
 
 [tool.uv.sources]
 vectorlink-gpu = { git = "ssh://git@github.com/vectorlink-ai/vectorlink-gpu" }

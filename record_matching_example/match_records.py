@@ -17,6 +17,7 @@ from typing import Optional, Dict
 from vectorlink_gpu.ann import ANN
 from vectorlink_gpu.datafusion import dataframe_to_tensor, tensor_to_arrow
 
+from sklearn.utils import shuffle
 from sklearn.metrics.cluster import adjusted_rand_score
 
 """
@@ -468,24 +469,30 @@ def train_weights():
 
     training_size = int(batch_size * 2 / 3)
 
+    (x, y) = shuffle(x, y, random_state=23)
     x_train = x[0:training_size]
     x_test = x[training_size:]
 
     y_train = y[0:training_size]
     y_test = y[training_size:]
 
-    logr = linear_model.LogisticRegression()
+    logr = linear_model.LogisticRegression(verbose=5, solver="liblinear")
     logr.fit(x_train, y_train)
 
     y_predicted = logr.predict(x_test)
     auc = metrics.roc_auc_score(y_test, y_predicted)
-    print(f"ROC AUC: {auc}")
-    d = {}
+    print(f"\nROC AUC: {auc}")
+
     coef = logr.coef_[0].astype(np.float32())
     intercept = logr.intercept_.astype(np.float32())
     weights = np.concatenate([intercept, coef])
     weight_object = dict(zip(["intercept"] + keys, map(lambda w: [w], weights)))
     ctx.from_pydict(weight_object).write_parquet("output/weights")
+
+
+def show_weights() -> df.DataFrame:
+    ctx = df.SessionContext()
+    return ctx.read_parquet("output/weights")
 
 
 def classify(x, weights):
@@ -734,11 +741,68 @@ def calculate_adjusted_rand_score():
 
 
 def recall():
-    pass
+    ctx = df.SessionContext()
 
+    records = ctx.read_parquet("output/records/")
+    original_match = (
+        records.select(df.col('"TID"').alias("left"), df.col('"CID"').alias("cid_left"))
+        .join(
+            records.select(
+                df.col('"TID"').alias("right"), df.col('"CID"').alias("cid_right")
+            ),
+            how="inner",
+            left_on="cid_left",
+            right_on="cid_right",
+        )
+        .sort(df.col("left"), df.col("right"))
+        .filter(df.col("left") < df.col("right"))
+        .select(
+            df.functions.array(df.col("left"), df.col("right")).alias("original_pair")
+        )
+    )
 
-def precision():
-    pass
+    clusters = ctx.read_parquet("output/clusters/")
+    our_match = (
+        clusters.select(
+            df.col("cluster_element").alias("left"),
+            df.col("cluster_id").alias("cid_left"),
+        )
+        .join(
+            clusters.select(
+                df.col("cluster_element").alias("right"),
+                df.col("cluster_id").alias("cid_right"),
+            ),
+            how="inner",
+            left_on="cid_left",
+            right_on="cid_right",
+        )
+        .select(df.col("left"), df.col("right"))
+        .sort(df.col("left"), df.col("right"))
+        .filter(df.col("left") < df.col("right"))
+        .select(
+            df.functions.array(df.col("left"), df.col("right")).alias("predicted_pair")
+        )
+    )
+
+    true_positives = our_match.join(
+        original_match, how="inner", left_on="predicted_pair", right_on="original_pair"
+    ).count()
+    false_positives = our_match.join(
+        original_match, how="anti", left_on="predicted_pair", right_on="original_pair"
+    ).count()
+    false_negatives = original_match.join(
+        our_match, how="anti", left_on="original_pair", right_on="predicted_pair"
+    ).count()
+
+    precision = true_positives / (true_positives + false_positives)
+    fdr = false_positives / (true_positives + false_positives)
+    recall = true_positives / (true_positives + false_negatives)
+    f1 = 2 * true_positives / (2 * true_positives + false_positives + false_negatives)
+
+    print(f"precision: {precision}")
+    print(f"false discovery rate: {fdr}")
+    print(f"recall: {recall}")
+    print(f"F1: {f1}")
 
 
 def main():
