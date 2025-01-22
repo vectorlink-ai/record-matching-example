@@ -17,6 +17,8 @@ from typing import Optional, Dict
 from vectorlink_gpu.ann import ANN
 from vectorlink_gpu.datafusion import dataframe_to_tensor, tensor_to_arrow
 
+from sklearn.metrics.cluster import adjusted_rand_score
+
 """
 Matching process
 
@@ -708,6 +710,27 @@ def calculate_expanded_match(frame: df.DataFrame) -> df.DataFrame:
         )
         .sort(df.col("left"), df.col("right"))
     )
+
+
+def calculate_adjusted_rand_score():
+    ctx = df.SessionContext()
+    orig = (
+        ctx.read_parquet("output/records/")
+        .sort(df.col('"TID"'))
+        .select('"CID"')
+        .to_pydict()["CID"]
+    )
+
+    ours = (
+        ctx.read_parquet("output/clusters/")
+        .sort(df.col("cluster_element"))
+        .select("cluster_id")
+        .to_pydict()["cluster_id"]
+    )
+
+    score = adjusted_rand_score(orig, ours)
+
+    return score
 
 
 def main():

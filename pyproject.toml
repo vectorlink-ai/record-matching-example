@@ -34,6 +34,7 @@ calculate-field-distances = 'record_matching_example.match_records:calculate_fie
 classify-record-matches = 'record_matching_example.match_records:classify_record_matches'
 search = 'record_matching_example.match_records:search'
 build-clusters = 'record_matching_example.match_records:build_clusters'
+adjusted-rand-score = 'record_matching_example.match_records:calculate_adjusted_rand_score'
 
 [tool.uv.sources]
 vectorlink-gpu = { git = "ssh://git@github.com/vectorlink-ai/vectorlink-gpu" }
