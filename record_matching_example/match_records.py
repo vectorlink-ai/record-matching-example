@@ -412,7 +412,7 @@ def train_weights():
     keys = sorted(list(templates.keys()))
 
     field_distances = ctx.read_parquet("output/match_field_distances/")
-    x = get_field_distances(ctx, len(keys), field_distances)
+    x = get_field_distances(ctx, field_distances)
     (batch_size, _) = x.size()
     x = x.cpu().detach().numpy()
 
@@ -541,7 +541,7 @@ def calculate_field_distances():
     candidate_field_distances(ctx, candidates, "output/field_distances/")
 
 
-def get_field_distances(ctx, key_count, source: df.DataFrame) -> torch.Tensor:
+def get_field_distances(ctx, source: df.DataFrame) -> torch.Tensor:
     field_distances = (
         source.aggregate(
             [df.col("left_tid"), df.col("right_tid")],
@@ -555,7 +555,7 @@ def get_field_distances(ctx, key_count, source: df.DataFrame) -> torch.Tensor:
         .select(df.col("distances"))
     )
     size = field_distances.count()
-    x = torch.empty((size, key_count), dtype=torch.float32, device="cuda")
+    x = torch.empty((size, len(templates)), dtype=torch.float32, device="cuda")
     dataframe_to_tensor(field_distances, x)
     return x
 
@@ -574,7 +574,7 @@ def classify_record_matches():
     field_distances = ctx.read_parquet("output/field_distances/")
     (weight_count,) = weights.size()
     key_count = weight_count - 1  # minus intercept
-    x = get_field_distances(ctx, key_count, field_distances)
+    x = get_field_distances(ctx, field_distances)
     print("beginning classification...")
     y_hat = classify(x, weights)
     filtered = (
@@ -585,6 +585,71 @@ def classify_record_matches():
     filtered["prediction"] = y_hat.cpu().detach().numpy()
     print("writing predictions...")
     ctx.from_pandas(filtered).write_parquet("output/prediction")
+
+
+def build_clusters():
+    ctx = df.SessionContext()
+    ids = ctx.read_parquet("output/records/").select(df.col('"TID"')).to_pydict()["TID"]
+    disjoint_set = scipy.cluster.hierarchy.DisjointSet(ids)
+    matches = ctx.read_parquet("output/prediction/").filter(df.col("prediction") > 0.5)
+    for batch in matches.execute_stream():
+        batch = batch.to_pyarrow().to_pandas()
+        for _, record in batch.iterrows():
+            left = int(record["left"])
+            right = int(record["right"])
+            disjoint_set.merge(left, right)
+
+    x = disjoint_set.subsets()
+    cluster_ids = []
+    cluster_elements = []
+    for cluster_id, cluster in enumerate(x):
+        for cluster_element in cluster:
+            cluster_ids.append(cluster_id)
+            cluster_elements.append(cluster_element)
+    ctx.from_pydict(
+        {"cluster_id": cluster_ids, "cluster_element": cluster_elements}
+    ).write_parquet("output/clusters/")
+
+
+def embedding_for_tid(ctx: df.SessionContext, key: str, tid: int) -> np.ndarray:
+    averages = ctx.read_parquet("output/vector_averages/").to_pandas()
+    vectors = ctx.read_parquet("output/vectors/")
+    average_for_key = pa.array(
+        averages[averages["template"] == key].iloc[0, 1]
+    ).to_numpy()
+    embedding = (
+        ctx.read_parquet(f"output/templated/{key}/")
+        .select(df.col('"TID"'), df.col("hash").alias("field_hash"))
+        .filter(df.col('"TID"') == tid)
+        .join(vectors, how="inner", left_on="field_hash", right_on="hash")
+        .select(df.col("embedding"))
+        .to_pandas()["embedding"]
+        .to_numpy()
+    )
+
+    if len(embedding) == 0:
+        print(average_for_key)
+        return average_for_key
+    else:
+        return embedding[0]
+
+
+def calculate_record_distance(left: int, right: int) -> float:
+    ctx = df.SessionContext()
+    distances = [1.0]
+    vectors = ctx.read_parquet("output/vectors/")
+    keys = sorted(list(templates.keys()))
+    for key in keys:
+        print(key)
+        left_embedding = embedding_for_tid(ctx, key, left)
+        right_embedding = embedding_for_tid(ctx, key, right)
+
+        distance = (1 - (left_embedding * right_embedding).sum()) / 2
+        distances.append(distance)
+
+    weights = ctx.read_parquet("output/weights").to_pandas().to_numpy()[0]
+
+    return scipy.special.expit((distances * weights).sum())
 
 
 def main():
@@ -601,6 +666,7 @@ def main():
     filter_candidates()
     calculate_field_distances()
     classify_record_matches()
+    build_clusters()
 
 
 if __name__ == "__main__":
