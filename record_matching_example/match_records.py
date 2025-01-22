@@ -235,7 +235,7 @@ def discover_training_set():
             same += 1
         else:
             different += 1
-
+        # This really should be rename to `left_tid` / `right_tid`
         record = {"match": answer, "left": id1, "right": id2}
         candidates.append(record)
 
@@ -322,13 +322,11 @@ def load_ann() -> ANN:
     return ann
 
 
-def calculate_field_distances():
-    ctx = df.SessionContext()
-    candidates = ctx.read_parquet("output/training_set/")
+def candidate_field_distances(ctx, candidates: df.DataFrame, destination: str):
     averages = ctx.read_parquet("output/vector_averages/").to_pandas()
     vectors = ctx.read_parquet("output/vectors/")
     for key in templates.keys():
-        print(key)
+        print(f"processing key {key}")
         average_for_key = pa.array(
             averages[averages["template"] == key].iloc[0, 1]
         ).to_numpy()
@@ -371,7 +369,6 @@ def calculate_field_distances():
                 ).alias(f"right_embedding"),
                 df.col("left").alias("left_tid"),
                 df.col("right").alias("right_tid"),
-                df.col("match"),
             )
         ).sort(df.col("left_tid"), df.col("right_tid"))
         size = vector_comparisons.count()
@@ -383,7 +380,9 @@ def calculate_field_distances():
         dataframe_to_tensor(
             vector_comparisons.select(df.col("right_embedding")), right_tensor
         )
-        distance = 1 - (left_tensor * right_tensor).sum(dim=1) / 2
+        distance = torch.clamp(
+            (1 - (left_tensor * right_tensor).sum(dim=1)) / 2, min=0.0, max=1.0
+        )
         distance_arrow = tensor_to_arrow(distance)
         distance_table = pa.table(
             vector_comparisons.select(
@@ -391,37 +390,29 @@ def calculate_field_distances():
             )
         ).append_column("distance", distance_arrow)
 
-        ctx.from_arrow(distance_table).write_parquet("output/match_field_distances/")
+        ctx.from_arrow(distance_table).write_parquet(destination)
+
+
+def calculate_training_field_distances():
+    print("Calculating training field distances...")
+    ctx = df.SessionContext()
+    candidates = ctx.read_parquet("output/training_set/")
+    candidate_field_distances(ctx, candidates, "output/match_field_distances/")
 
 
 def train_weights():
     """
     b := weights in order, 1D tensor
-    x := [1.0, distance keys in order], 2D tensor
+    x := [1.0, distance keys in order], 2D tensor, batch sorted by left,right
     y = sigma( x . b )
     y_hat := match value, 1D tensor
     """
     ctx = df.SessionContext()
     keys = sorted(list(templates.keys()))
 
-    field_distances = (
-        ctx.read_parquet("output/match_field_distances/")
-        .aggregate(
-            [df.col("left_tid"), df.col("right_tid")],
-            [
-                df.functions.array_agg(
-                    df.col("distance"), order_by=[df.col("key")]
-                ).alias("distances")
-            ],
-        )
-        .sort(df.col("left_tid"), df.col("right_tid"))
-        .select(df.col("distances"))
-    )
-    size = field_distances.count()
-    x = torch.empty((size, len(keys)), dtype=torch.float32, device="cuda")
-    dataframe_to_tensor(field_distances, x)
-    # TODO: This is exceptionally silly...
-    # Please create a numpy in the first place.
+    field_distances = ctx.read_parquet("output/match_field_distances/")
+    x = get_field_distances(ctx, len(keys), field_distances)
+    (batch_size, _) = x.size()
     x = x.cpu().detach().numpy()
 
     matches = (
@@ -431,7 +422,7 @@ def train_weights():
     )
     y = matches.to_pandas()["y"].to_numpy()
 
-    training_size = int(size * 2 / 3)
+    training_size = int(batch_size * 2 / 3)
 
     x_train = x[0:training_size]
     x_test = x[training_size:]
@@ -453,9 +444,8 @@ def train_weights():
     ctx.from_pydict(weight_object).write_parquet("output/weights")
 
 
-def classify(v1, v2, weights):
-    x = (1 - (v1 * v2).sum(dim=2)) / 2
-    batch_size = x.size()[0]
+def classify(x, weights):
+    (batch_size, _) = x.size()
     x = torch.concat(
         [torch.ones(batch_size, dtype=torch.float32, device="cuda").unsqueeze(1), x],
         dim=1,
@@ -520,22 +510,80 @@ def filter_candidates():
     ctx = df.SessionContext()
     ann = load_ann()
     (vector_count, beam_length) = ann.beams.size()
-    threshold = 0.3
+    threshold = 0.5
     index_map = pa.table(ctx.read_parquet("output/index_map")).to_pandas()
+    left = []
+    right = []
     for i in range(0, vector_count):
-        if i % 1000 == 0:
+        if i % 1000 == 0 and left is not []:
             print(f"processing {i}th record")
+            results = {"left": left, "right": right}
+            ctx.from_pydict(results).write_parquet("output/filtered/")
+            left = []
+            right = []
         tid1 = index_map[index_map["vector_id"] == i]["TID"].to_numpy()
         distances = ann.distances[i]
-        positions = (distances < threshold).flatten()
+        positions = distances < threshold
         indices = ann.beams[i][positions].cpu().detach().numpy()
         tids = index_map[index_map["vector_id"].isin(indices)]["TID"].to_numpy()
-        results = {"left_tid": tid1.repeat(len(tids)), "right_tid": tids}
+        left += list(tid1.repeat(len(tids)))
+        right += list(tids)
+    if left is not []:
+        results = {"left": left, "right": right}
         ctx.from_pydict(results).write_parquet("output/filtered/")
 
 
+def calculate_field_distances():
+    print("Calculating filter candidate field distances...")
+    ctx = df.SessionContext()
+    candidates = ctx.read_parquet("output/filtered/")
+    candidate_field_distances(ctx, candidates, "output/field_distances/")
+
+
+def get_field_distances(ctx, key_count, source: df.DataFrame) -> torch.Tensor:
+    field_distances = (
+        source.aggregate(
+            [df.col("left_tid"), df.col("right_tid")],
+            [
+                df.functions.array_agg(
+                    df.col("distance"), order_by=[df.col("key")]
+                ).alias("distances")
+            ],
+        )
+        .sort(df.col("left_tid"), df.col("right_tid"))
+        .select(df.col("distances"))
+    )
+    size = field_distances.count()
+    x = torch.empty((size, key_count), dtype=torch.float32, device="cuda")
+    dataframe_to_tensor(field_distances, x)
+    return x
+
+
 def classify_record_matches():
-    df.read_parquet("output/filtered")
+    print("Classifying record matches...")
+    ctx = df.SessionContext()
+    vectors = load_vectors(ctx)
+
+    weights = torch.tensor(
+        ctx.read_parquet("output/weights").to_pandas().to_numpy()[0],
+        dtype=torch.float32,
+        device="cuda",
+    )
+
+    field_distances = ctx.read_parquet("output/field_distances/")
+    (weight_count,) = weights.size()
+    key_count = weight_count - 1  # minus intercept
+    x = get_field_distances(ctx, key_count, field_distances)
+    print("beginning classification...")
+    y_hat = classify(x, weights)
+    filtered = (
+        ctx.read_parquet("output/filtered/")
+        .sort(df.col("left"), df.col("right"))
+        .to_pandas()
+    )
+    filtered["prediction"] = y_hat.cpu().detach().numpy()
+    print("writing predictions...")
+    ctx.from_pandas(filtered).write_parquet("output/prediction")
 
 
 def main():
@@ -547,9 +595,10 @@ def main():
     build_index_map()
     index_field()
     discover_training_set()
-    calculate_field_distances()
+    calculate_training_field_distances()
     train_weights()
     filter_candidates()
+    calculate_field_distances()
     classify_record_matches()
 
 
