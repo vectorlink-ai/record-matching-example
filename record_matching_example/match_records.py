@@ -10,9 +10,11 @@ import sys
 import torch
 import scipy
 from openai import OpenAI
+import openai as oa
 import re
 import argparse
 from typing import Optional, Dict
+import pybars
 
 from vectorlink_gpu.ann import ANN
 from vectorlink_gpu.datafusion import dataframe_to_tensor, tensor_to_arrow
@@ -614,7 +616,7 @@ def classify_record_matches():
 
 
 def build_clusters():
-    inclusion_threshold = 0.6
+    inclusion_threshold = 0.60
     ctx = context.build_session_context()
     ids = ctx.table("records").select(df.col('"TID"')).to_pydict()["TID"]
     disjoint_set = scipy.cluster.hierarchy.DisjointSet(ids)
@@ -716,7 +718,17 @@ def calculate_adjusted_rand_score():
 def recall():
     ctx = context.build_session_context()
 
-    records = ctx.table("records")
+    records = ctx.sql(
+        """
+        select records.* from records
+        inner join templated as title_templated ON (title_templated.key = 'title' AND title_templated."TID" = records."TID")
+        inner join templated as album_templated ON (album_templated.key = 'title' AND album_templated."TID" = records."TID")
+        inner join templated as artist_templated ON (artist_templated.key = 'title' AND artist_templated."TID" = records."TID")
+        inner join templated as year_templated ON (year_templated.key = 'title' AND year_templated."TID" = records."TID")
+        inner join templated as language_templated ON (language_templated.key = 'title' AND language_templated."TID" = records."TID")
+        inner join templated as composite_templated ON (composite_templated.key = 'title' AND composite_templated."TID" = records."TID")
+        """
+    )
     original_match = (
         records.select(df.col('"TID"').alias("left"), df.col('"CID"').alias("cid_left"))
         .join(
@@ -727,14 +739,18 @@ def recall():
             left_on="cid_left",
             right_on="cid_right",
         )
-        .sort(df.col("left"), df.col("right"))
         .filter(df.col("left") < df.col("right"))
+        .sort(df.col("left"), df.col("right"))
         .select(
             df.functions.array(df.col("left"), df.col("right")).alias("original_pair")
         )
     )
 
-    clusters = ctx.table("clusters")
+    clusters = (
+        ctx.table("clusters")
+        .join(records, how="inner", left_on="cluster_element", right_on='"TID"')
+        .select(df.col("cluster_id"), df.col("cluster_element"))
+    )
     our_match = (
         clusters.select(
             df.col("cluster_element").alias("left"),
@@ -762,10 +778,15 @@ def recall():
     ).count()
     false_positives = our_match.join(
         original_match, how="anti", left_on="predicted_pair", right_on="original_pair"
-    ).count()
+    )
+    print(false_positives)
+    false_positives = false_positives.count()
     false_negatives = original_match.join(
         our_match, how="anti", left_on="original_pair", right_on="predicted_pair"
     ).count()
+    print(f"true positives: {true_positives}")
+    print(f"false positives: {false_positives}")
+    print(f"false negatives: {false_negatives}")
 
     precision = true_positives / (true_positives + false_positives)
     fdr = false_positives / (true_positives + false_positives)
@@ -776,6 +797,50 @@ def recall():
     print(f"false discovery rate: {fdr}")
     print(f"recall: {recall}")
     print(f"F1: {f1}")
+
+
+def openai_compare_strings(s1: str, s2: str, model="text-embedding-3-small") -> float:
+    e1 = np.array(oa.embeddings.create(input=s1, model=model).data[0].embedding)
+    print(len(e1))
+    e2 = np.array(oa.embeddings.create(input=s2, model=model).data[0].embedding)
+    return float((1 - (e1 * e2).sum()) / 2)
+
+
+def openai_compare_fields(
+    ctx: df.SessionContext,
+    tid1: int,
+    tid2: int,
+    key: str,
+    model="text-embedding-3-small",
+) -> float:
+    s1 = ctx.sql(
+        f"""select templated from templated where "TID" = {tid1} and key = '{key}'"""
+    ).to_pylist()[0]["templated"]
+    s2 = ctx.sql(
+        f"""select templated from templated where "TID" = {tid2} and key = '{key}'"""
+    ).to_pylist()[0]["templated"]
+    return openai_compare_strings(s1, s2, model)
+
+
+def openai_compare_records_templated(
+    ctx: df.SessionContext,
+    tid1: int,
+    tid2: int,
+    template: str,
+    model="text-embedding-3-small",
+) -> float:
+    compiler = pybars.Compiler()
+    compiled_template = compiler.compile(template)
+    r1 = ctx.sql(
+        f"""select title, album, artist, length, language, year from records where "TID" = {tid1}"""
+    ).to_pylist()[0]
+    r2 = ctx.sql(
+        f"""select title, album, artist, length, language, year from records where "TID" = {tid2}"""
+    ).to_pylist()[0]
+
+    s1 = compiled_template(r1)
+    s2 = compiled_template(r2)
+    return openai_compare_strings(s1, s2, model)
 
 
 def main():

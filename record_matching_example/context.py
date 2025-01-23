@@ -77,12 +77,13 @@ FIELD_DISTANCES_SCHEMA = pa.schema(
 
 WEIGHTS_SCHEMA = pa.schema(
     [
-        pa.field("title", pa.float32(), nullable=False),
-        pa.field("artist", pa.float32(), nullable=False),
+        pa.field("intercept", pa.float32(), nullable=False),
         pa.field("album", pa.float32(), nullable=False),
-        pa.field("year", pa.float32(), nullable=False),
-        pa.field("language", pa.float32(), nullable=False),
+        pa.field("artist", pa.float32(), nullable=False),
         pa.field("composite", pa.float32(), nullable=False),
+        pa.field("language", pa.float32(), nullable=False),
+        pa.field("title", pa.float32(), nullable=False),
+        pa.field("year", pa.float32(), nullable=False),
     ]
 )
 

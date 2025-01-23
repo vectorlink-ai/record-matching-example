@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "pandas>=2.2.3",
+    "pybars3>=0.9.7",
     "scikit-learn>=1.6.1",
     "scipy>=1.15.1",
     "vectorlink-gpu",
