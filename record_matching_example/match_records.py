@@ -39,11 +39,11 @@ Matching process
 INPUT_CSV_PATH = "musicbrainz-20-A01.csv.dapo"
 
 templates = {
-    "title": "{{#if title}}title: {{title}}\n{{/if}}",
-    "artist": "{{#if artist}}artist: {{artist}}\n{{/if}}",
-    "album": "{{#if album}}album: {{album}}\n{{/if}}",
-    "year": "{{#if year}}year: {{year}}\n{{/if}}",
-    "language": "{{#if language}}language: {{language}}\n{{/if}}",
+    "title": "{{#if title}}album title: {{title}}\n{{/if}}",
+    "artist": "{{#if artist}}album artist: {{artist}}\n{{/if}}",
+    "album": "{{#if album}}album name: {{album}}\n{{/if}}",
+    "year": "{{#if year}}album release year: {{year}}\n{{/if}}",
+    "language": "{{#if language}}album language: {{language}}\n{{/if}}",
 }
 
 templates["composite"] = (
@@ -616,7 +616,7 @@ def classify_record_matches():
 
 
 def build_clusters():
-    inclusion_threshold = 0.60
+    inclusion_threshold = 0.85
     ctx = context.build_session_context()
     ids = ctx.table("records").select(df.col('"TID"')).to_pydict()["TID"]
     disjoint_set = scipy.cluster.hierarchy.DisjointSet(ids)
