@@ -227,6 +227,7 @@ def discover_training_set():
     record = []
     candidates = []
     for i in range(0, candidate_size):
+        print(f"evaluating record {i}/{candidate_size}")
         beam = ann.beams[i]
         distance = ann.distances[i]
         indices = (distance > threshold).nonzero()
@@ -240,7 +241,7 @@ def discover_training_set():
         else:
             j = beam[0]
 
-        (answer, id1, id2) = ask_oracle(ctx, int(i), int(j))
+        (answer, id1, id2) = ask_oracle_with_vid(ctx, int(i), int(j))
         if answer == True:
             same += 1
         else:
@@ -254,7 +255,7 @@ def discover_training_set():
     ctx.from_pandas(candidates_pd).write_parquet("output/training_set/")
 
 
-def get_record_from_vid(ctx, vid) -> str:
+def get_record_from_vid(ctx, vid) -> Dict:
     templated_df = (
         ctx.table("templated")
         .filter(df.col("key") == "composite")
@@ -277,7 +278,7 @@ def check_y_or_n(string):
         return True
 
 
-def ask_oracle(ctx, vid1, vid2):
+def ask_oracle_with_vid(ctx, vid1, vid2):
     """
     1. Map from vid to record id
     2. load record 1 and 2
@@ -286,6 +287,22 @@ def ask_oracle(ctx, vid1, vid2):
     record1 = get_record_from_vid(ctx, vid1)
     record2 = get_record_from_vid(ctx, vid2)
 
+    y_or_n = ask_oracle(record1["templated"], record2["templated"])
+
+    return (y_or_n, record1["TID"], record2["TID"])
+
+
+def ask_oracle_with_tid(ctx, tid1, tid2):
+    record1 = ctx.sql(
+        f"SELECT templated FROM templated WHERE key = 'composite' AND \"TID\" = {tid1}"
+    ).to_pylist()[0]
+    record2 = ctx.sql(
+        f"SELECT templated FROM templated WHERE key = 'composite' AND \"TID\" = {tid2}"
+    ).to_pylist()[0]
+    return ask_oracle(record1["templated"], record2["templated"])
+
+
+def ask_oracle(s1, s2):
     subject = "pieces of music"
     client = OpenAI()
 
@@ -300,20 +317,19 @@ def ask_oracle(ctx, vid1, vid2):
                 "role": "user",
                 "content": f"""Tell me whether the following two records are referring to the same entity or a different entity using a chain of reasoning followed by a single yes or no answer on a single line, without any formatting.
 
-1:  {record1['templated']}
+1:  {s1}
 
-2:  {record2['templated']}
+2:  {s2}
 """,
             },
         ],
     )
     content = completion.choices[0].message.content
     print(content)
-    return (
-        check_y_or_n(completion.choices[0].message.content),
-        record1["TID"],
-        record2["TID"],
-    )
+    verdict = check_y_or_n(completion.choices[0].message.content)
+    print(f"verdict: {verdict}")
+
+    return verdict
 
 
 def load_ann() -> ANN:
@@ -368,10 +384,12 @@ def candidate_field_distances(ctx, candidates: df.DataFrame, destination: str):
             )
             .select(
                 df.functions.coalesce(
-                    df.col("left_embedding"), df.lit(average_for_key)
+                    df.col("left_embedding"),
+                    df.lit(average_for_key).cast(pa.list_(pa.float32(), 1536)),
                 ).alias(f"left_embedding"),
                 df.functions.coalesce(
-                    df.col("right_embedding"), df.lit(average_for_key)
+                    df.col("right_embedding"),
+                    df.lit(average_for_key).cast(pa.list_(pa.float32(), 1536)),
                 ).alias(f"right_embedding"),
                 df.col("left").alias("left_tid"),
                 df.col("right").alias("right_tid"),
