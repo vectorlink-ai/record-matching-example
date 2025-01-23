@@ -39,7 +39,9 @@ Matching process
 INPUT_CSV_PATH = "musicbrainz-20-A01.csv.dapo"
 
 TEMPLATES = {
-    "title": "{{#if title}}album title: {{title}}\n{{/if}}",
+    "number": "{{#if number}}album track number: {{number}}\n{{/if}}",
+    "length": "{{#if number}}song duration: {{number}}\n{{/if}}",
+    "title": "{{#if title}}song title: {{title}}\n{{/if}}",
     "artist": "{{#if artist}}album artist: {{artist}}\n{{/if}}",
     "album": "{{#if album}}album name: {{album}}\n{{/if}}",
     "year": "{{#if year}}album release year: {{year}}\n{{/if}}",
@@ -47,7 +49,7 @@ TEMPLATES = {
 }
 
 TEMPLATES["composite"] = (
-    f"{TEMPLATES['title']}{TEMPLATES['artist']}{TEMPLATES['album']}{TEMPLATES['year']}{TEMPLATES['language']}"
+    f"{TEMPLATES['title']}{TEMPLATES['artist']}{TEMPLATES['album']}{TEMPLATES['year']}{TEMPLATES['language']}{TEMPLATES['number']}{TEMPLATES['length']}"
 )
 
 
@@ -616,7 +618,7 @@ def classify_record_matches():
 
 
 def build_clusters():
-    inclusion_threshold = 0.85
+    inclusion_threshold = 0.86
     ctx = context.build_session_context()
     ids = ctx.table("records").select(df.col('"TID"')).to_pydict()["TID"]
     disjoint_set = scipy.cluster.hierarchy.DisjointSet(ids)
@@ -844,6 +846,13 @@ def openai_compare_records_templated(
 
 
 def main():
+    parser = argparse.ArgumentParser(usage="match-records  [options]")
+    parser.add_argument(
+        "-s", "--skip-training-set-discovery", action="store_true", default=False
+    )
+
+    args = parser.parse_args()
+
     ingest_csv()
     template_records()
     dedup_records()
@@ -851,7 +860,10 @@ def main():
     average_fields()
     build_index_map()
     index_field()
-    discover_training_set()
+    if args.skip_training_set_discovery:
+        print("Skipping training set discovery..")
+    else:
+        discover_training_set()
     calculate_training_field_distances()
     train_weights()
     filter_candidates()
