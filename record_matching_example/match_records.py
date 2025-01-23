@@ -38,7 +38,7 @@ Matching process
 
 INPUT_CSV_PATH = "musicbrainz-20-A01.csv.dapo"
 
-templates = {
+TEMPLATES = {
     "title": "{{#if title}}album title: {{title}}\n{{/if}}",
     "artist": "{{#if artist}}album artist: {{artist}}\n{{/if}}",
     "album": "{{#if album}}album name: {{album}}\n{{/if}}",
@@ -46,8 +46,8 @@ templates = {
     "language": "{{#if language}}album language: {{language}}\n{{/if}}",
 }
 
-templates["composite"] = (
-    f"{templates['title']}{templates['artist']}{templates['album']}{templates['year']}{templates['language']}"
+TEMPLATES["composite"] = (
+    f"{TEMPLATES['title']}{TEMPLATES['artist']}{TEMPLATES['album']}{TEMPLATES['year']}{TEMPLATES['language']}"
 )
 
 
@@ -72,7 +72,7 @@ def template_records():
     eprintln("templating...")
     tpl.write_templated_fields(
         dataframe,
-        templates,
+        TEMPLATES,
         "output/templated/",
         id_column='"TID"',
         columns_of_interest=[
@@ -139,7 +139,7 @@ def average_fields():
     ctx = context.build_session_context()
 
     eprintln("averaging (for imputation)...")
-    for key in templates.keys():
+    for key in TEMPLATES.keys():
         write_field_averages(ctx, key, "output/vector_averages/")
 
 
@@ -347,7 +347,7 @@ def load_ann() -> ANN:
 def candidate_field_distances(ctx, candidates: df.DataFrame, destination: str):
     averages = ctx.table("vector_averages").to_pandas()
     vectors = ctx.table("vectors")
-    for key in templates.keys():
+    for key in TEMPLATES.keys():
         print(f"processing key {key}")
         average_for_key = pa.array(
             averages[averages["template"] == key].iloc[0, 1]
@@ -435,7 +435,7 @@ def train_weights():
     y_hat := match value, 1D tensor
     """
     ctx = context.build_session_context()
-    keys = sorted(list(templates.keys()))
+    keys = sorted(list(TEMPLATES.keys()))
 
     field_distances = ctx.table("match_field_distances")
     x = get_field_distances(ctx, field_distances)
@@ -587,7 +587,7 @@ def get_field_distances(ctx, source: df.DataFrame) -> torch.Tensor:
         .select(df.col("distances"))
     )
     size = field_distances.count()
-    x = torch.empty((size, len(templates)), dtype=torch.float32, device="cuda")
+    x = torch.empty((size, len(TEMPLATES)), dtype=torch.float32, device="cuda")
     dataframe_to_tensor(field_distances, x)
     return x
 
@@ -668,7 +668,7 @@ def calculate_record_distance(left: int, right: int) -> float:
     ctx = context.build_session_context()
     distances = [1.0]
     vectors = ctx.table("vectors")
-    keys = sorted(list(templates.keys()))
+    keys = sorted(list(TEMPLATES.keys()))
     for key in keys:
         left_embedding = embedding_for_tid(ctx, key, left)
         right_embedding = embedding_for_tid(ctx, key, right)
