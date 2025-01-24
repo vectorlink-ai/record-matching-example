@@ -787,6 +787,7 @@ def recall():
     false_positives = our_match.join(
         original_match, how="anti", left_on="predicted_pair", right_on="original_pair"
     )
+    print("False positives...")
     print(false_positives)
     false_positives = false_positives.count()
     false_negatives = original_match.join(
