@@ -100,7 +100,15 @@ def vectorize_records():
     ctx = context.build_session_context()
 
     eprintln("vectorizing...")
-    embed.vectorize(ctx, "output/dedup/", "output/vectors/")
+    configuration = {
+        "provider": "OpenAI",
+        "max_batch_size": 200 * 2**20,
+        "dimension": context.EMBEDDING_SIZE,
+        "model": context.MODEL,
+    }
+    embed.vectorize(
+        ctx, "output/dedup/", "output/vectors/", configuration=configuration
+    )
 
 
 def write_field_averages(
@@ -122,7 +130,7 @@ def field_vectors(
 ) -> torch.Tensor:
     if configuration is None:
         # defaults to OpenAI dimensions / datatype
-        configuration = {"dimensions": 1536, "field_type": "float32"}
+        configuration = {"dimensions": context.EMBEDDING_SIZE, "field_type": "float32"}
     result = (
         ctx.table("templated_vectors")
         .filter(df.col("key") == key)
@@ -165,7 +173,9 @@ def load_vectors(ctx: df.SessionContext) -> torch.Tensor:
     )
     count = embeddings.count()
 
-    vectors = torch.empty((count, 1536), dtype=torch.float32, device="cuda")
+    vectors = torch.empty(
+        (count, context.EMBEDDING_SIZE), dtype=torch.float32, device="cuda"
+    )
     dataframe_to_tensor(embeddings, vectors)
 
     return vectors
@@ -241,7 +251,7 @@ def discover_training_set():
         pivot = indices[0][0]
         total = same + different
         if same > total / 2 and pivot < len(distance):
-            j = beam[-1]
+            j = beam[pivot]
         else:
             j = beam[0]
 
@@ -389,11 +399,15 @@ def candidate_field_distances(ctx, candidates: df.DataFrame, destination: str):
             .select(
                 df.functions.coalesce(
                     df.col("left_embedding"),
-                    df.lit(average_for_key).cast(pa.list_(pa.float32(), 1536)),
+                    df.lit(average_for_key).cast(
+                        pa.list_(pa.float32(), context.EMBEDDING_SIZE)
+                    ),
                 ).alias(f"left_embedding"),
                 df.functions.coalesce(
                     df.col("right_embedding"),
-                    df.lit(average_for_key).cast(pa.list_(pa.float32(), 1536)),
+                    df.lit(average_for_key).cast(
+                        pa.list_(pa.float32(), context.EMBEDDING_SIZE)
+                    ),
                 ).alias(f"right_embedding"),
                 df.col("left").alias("left_tid"),
                 df.col("right").alias("right_tid"),
@@ -401,11 +415,15 @@ def candidate_field_distances(ctx, candidates: df.DataFrame, destination: str):
         ).sort(df.col("left_tid"), df.col("right_tid"))
         size = vector_comparisons.count()
         print(f"total comparisons: {size}")
-        left_tensor = torch.empty((size, 1536), dtype=torch.float32, device="cuda")
+        left_tensor = torch.empty(
+            (size, context.EMBEDDING_SIZE), dtype=torch.float32, device="cuda"
+        )
         dataframe_to_tensor(
             vector_comparisons.select(df.col("left_embedding")), left_tensor
         )
-        right_tensor = torch.empty((size, 1536), dtype=torch.float32, device="cuda")
+        right_tensor = torch.empty(
+            (size, context.EMBEDDING_SIZE), dtype=torch.float32, device="cuda"
+        )
         dataframe_to_tensor(
             vector_comparisons.select(df.col("right_embedding")), right_tensor
         )
@@ -520,7 +538,7 @@ def ann_search(ctx: df.SessionContext, ann: ANN, query_string: str) -> df.DataFr
     )
     embedding = response.data[0].embedding
     query_tensor = torch.tensor(embedding, dtype=torch.float32, device="cuda").reshape(
-        (1, 1536)
+        (1, context.EMBEDDING_SIZE)
     )
 
     result = ann.search(query_tensor)
@@ -618,7 +636,7 @@ def classify_record_matches():
 
 
 def build_clusters():
-    inclusion_threshold = 0.86
+    inclusion_threshold = 0.87  # 0.8  # 0.86
     ctx = context.build_session_context()
     ids = ctx.table("records").select(df.col('"TID"')).to_pydict()["TID"]
     disjoint_set = scipy.cluster.hierarchy.DisjointSet(ids)
@@ -720,17 +738,7 @@ def calculate_adjusted_rand_score():
 def recall():
     ctx = context.build_session_context()
 
-    records = ctx.sql(
-        """
-        select records.* from records
-        inner join templated as title_templated ON (title_templated.key = 'title' AND title_templated."TID" = records."TID")
-        inner join templated as album_templated ON (album_templated.key = 'title' AND album_templated."TID" = records."TID")
-        inner join templated as artist_templated ON (artist_templated.key = 'title' AND artist_templated."TID" = records."TID")
-        inner join templated as year_templated ON (year_templated.key = 'title' AND year_templated."TID" = records."TID")
-        inner join templated as language_templated ON (language_templated.key = 'title' AND language_templated."TID" = records."TID")
-        inner join templated as composite_templated ON (composite_templated.key = 'title' AND composite_templated."TID" = records."TID")
-        """
-    )
+    records = ctx.table("records")
     original_match = (
         records.select(df.col('"TID"').alias("left"), df.col('"CID"').alias("cid_left"))
         .join(
@@ -748,10 +756,8 @@ def recall():
         )
     )
 
-    clusters = (
-        ctx.table("clusters")
-        .join(records, how="inner", left_on="cluster_element", right_on='"TID"')
-        .select(df.col("cluster_id"), df.col("cluster_element"))
+    clusters = ctx.table("clusters").select(
+        df.col("cluster_id"), df.col("cluster_element")
     )
     our_match = (
         clusters.select(

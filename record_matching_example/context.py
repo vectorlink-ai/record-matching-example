@@ -41,7 +41,8 @@ INDEX_MAP_SCHEMA = pa.schema(
     ]
 )
 
-EMBEDDING_SIZE = 1536
+MODEL = "text-embedding-3-large"
+EMBEDDING_SIZE = 3072  # 1536
 
 VECTORS_SCHEMA = pa.schema(
     [
