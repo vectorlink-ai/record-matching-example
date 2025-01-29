@@ -13,8 +13,9 @@ from openai import OpenAI
 import openai as oa
 import re
 import argparse
-from typing import Optional, Dict
+from typing import Optional, Dict, Literal, List
 import pybars
+import time
 
 from vectorlink_gpu.ann import ANN
 from vectorlink_gpu.datafusion import dataframe_to_tensor, tensor_to_arrow
@@ -100,14 +101,12 @@ def vectorize_records():
     ctx = context.build_session_context()
 
     eprintln("vectorizing...")
-    configuration = {
-        "provider": "OpenAI",
-        "max_batch_size": 200 * 2**20,
-        "dimension": context.EMBEDDING_SIZE,
-        "model": context.MODEL,
-    }
     embed.vectorize(
-        ctx, "output/dedup/", "output/vectors/", configuration=configuration
+        ctx,
+        "output/dedup/",
+        "output/vectors/",
+        model=context.MODEL,
+        dimension=context.EMBEDDING_SIZE,
     )
 
 
@@ -320,26 +319,29 @@ def ask_oracle(s1, s2):
     subject = "pieces of music"
     client = OpenAI()
 
+    prompt = "You are a classifier deciding if two songs are a match or not."
+    question = f"""Tell me whether the following two records are referring to the same entity or a different entity using a chain of reasoning followed by a single yes or no answer on a single line, without any formatting.
+
+1:  {s1}
+
+2:  {s2}
+"""
     completion = client.chat.completions.create(
         model="gpt-4o",
         messages=[
             {
                 "role": "system",
-                "content": "You are a classifier deciding if two songs are a match or not.",
+                "content": prompt,
             },
             {
                 "role": "user",
-                "content": f"""Tell me whether the following two records are referring to the same entity or a different entity using a chain of reasoning followed by a single yes or no answer on a single line, without any formatting.
-
-1:  {s1}
-
-2:  {s2}
-""",
+                "content": question,
             },
         ],
     )
+    print(f">> {question}")
     content = completion.choices[0].message.content
-    print(content)
+    print(f"\n<< {content}")
     verdict = check_y_or_n(completion.choices[0].message.content)
     print(f"verdict: {verdict}")
 
@@ -447,7 +449,7 @@ def calculate_training_field_distances():
     candidate_field_distances(ctx, candidates, "output/match_field_distances/")
 
 
-def train_weights():
+def train_weights(destination="output/weights"):
     """
     b := weights in order, 1D tensor
     x := [1.0, distance keys in order], 2D tensor, batch sorted by left,right
@@ -489,7 +491,7 @@ def train_weights():
     intercept = logr.intercept_.astype(np.float32())
     weights = np.concatenate([intercept, coef])
     weight_object = dict(zip(["intercept"] + keys, map(lambda w: [w], weights)))
-    ctx.from_pydict(weight_object).write_parquet("output/weights")
+    ctx.from_pydict(weight_object).write_parquet(destination)
 
 
 def show_weights() -> df.DataFrame:
@@ -507,14 +509,12 @@ def classify(x, weights):
     return y_hat
 
 
-def search():
-    parser = argparse.ArgumentParser(usage="search [query] [options]")
-    parser.add_argument("query", help="The query to search for")
-    args = parser.parse_args()
-    ann = load_ann()
+def search_string(query: str, ann: Optional[ANN] = None) -> df.DataFrame:
+    if ann is None:
+        ann = load_ann()
     ctx = context.build_session_context()
     result = (
-        ann_search(ctx, ann, args.query)
+        ann_search(ctx, ann, query)
         .sort(df.col("distance"))
         .select(
             df.col("distance"),
@@ -527,15 +527,22 @@ def search():
         )
     )
 
-    result.show()
+    return result
+
+
+def search():
+    parser = argparse.ArgumentParser(usage="search [query] [options]")
+    parser.add_argument("query", help="The query to search for")
+    args = parser.parse_args()
+    result = search_string(args.query)
+
+    return result
 
 
 def ann_search(ctx: df.SessionContext, ann: ANN, query_string: str) -> df.DataFrame:
     client = OpenAI()
 
-    response = client.embeddings.create(
-        input=query_string, model="text-embedding-3-small"
-    )
+    response = client.embeddings.create(input=query_string, model=context.MODEL)
     embedding = response.data[0].embedding
     query_tensor = torch.tensor(embedding, dtype=torch.float32, device="cuda").reshape(
         (1, context.EMBEDDING_SIZE)
@@ -563,7 +570,7 @@ def filter_candidates():
     ctx = context.build_session_context()
     ann = load_ann()
     (vector_count, beam_length) = ann.beams.size()
-    threshold = 0.3
+    threshold = 0.3  # Influence the number of checked pairs
     index_map = pa.table(ctx.table("index_map")).to_pandas()
     left = []
     right = []
@@ -666,11 +673,13 @@ def embedding_for_tid(ctx: df.SessionContext, key: str, tid: int) -> np.ndarray:
     average_for_key = pa.array(
         averages[averages["template"] == key].iloc[0, 1]
     ).to_numpy()
+
     embedding = (
         ctx.table("templated")
-        .filter(df.col("key") == key)
-        .select(df.col('"TID"'), df.col("hash").alias("field_hash"))
         .filter(df.col('"TID"') == tid)
+        .filter(df.col("key") == key)
+        .limit(1)
+        .select(df.col('"TID"'), df.col("hash").alias("field_hash"))
         .join(vectors, how="inner", left_on="field_hash", right_on="hash")
         .select(df.col("embedding"))
         .to_pandas()["embedding"]
@@ -808,11 +817,30 @@ def recall():
     print(f"F1: {f1}")
 
 
-def openai_compare_strings(s1: str, s2: str, model="text-embedding-3-small") -> float:
+def openai_compare_strings(
+    s1: str,
+    s2: str,
+    model: Literal[
+        "text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"
+    ] = "text-embedding-3-small",
+) -> float:
     e1 = np.array(oa.embeddings.create(input=s1, model=model).data[0].embedding)
     print(len(e1))
     e2 = np.array(oa.embeddings.create(input=s2, model=model).data[0].embedding)
     return float((1 - (e1 * e2).sum()) / 2)
+
+
+def cosine_distance(v1, v2):
+    return float((1 - (v1 * v2).sum()) / 2)
+
+
+def openai_embedding(
+    s: str,
+    model: Literal[
+        "text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"
+    ] = "text-embedding-3-small",
+) -> np.ndarray:
+    return np.array(oa.embeddings.create(input=s, model=model).data[0].embedding)
 
 
 def openai_compare_fields(
@@ -849,6 +877,7 @@ def openai_compare_records_templated(
 
     s1 = compiled_template(r1)
     s2 = compiled_template(r2)
+
     return openai_compare_strings(s1, s2, model)
 
 
