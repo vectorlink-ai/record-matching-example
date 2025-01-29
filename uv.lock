@@ -639,6 +639,7 @@ name = "record-matching-example"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "datafusion" },
     { name = "pandas" },
     { name = "pybars3" },
     { name = "scikit-learn" },
@@ -649,6 +650,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "datafusion", specifier = ">=43.1.0" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pybars3", specifier = ">=0.9.7" },
     { name = "scikit-learn", specifier = ">=1.6.1" },

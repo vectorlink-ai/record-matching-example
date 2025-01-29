@@ -84,11 +84,11 @@
     },
     "pyproject-nix-overrides": {
       "locked": {
-        "lastModified": 1737028254,
-        "narHash": "sha256-uDkBXQrsp13HSLn8jlhSaPmuKSU7su01TtLoHtTBxOY=",
+        "lastModified": 1738155003,
+        "narHash": "sha256-ASxgsE7oP5LS8jrl36KpIEUwLhzmngImVbjW1QZWzzU=",
         "owner": "vectorlink-ai",
         "repo": "pyproject-nix-overrides",
-        "rev": "4bf6e261ed56ef12a3ec802dcfa4d7fb78306469",
+        "rev": "9f2d24a0220bd86929620eb220c832f2d93c8327",
         "type": "github"
       },
       "original": {
